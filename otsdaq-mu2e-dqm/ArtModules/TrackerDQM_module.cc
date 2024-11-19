@@ -4,11 +4,10 @@
 #include <TBufferFile.h>
 #include <TH1F.h>
 
-#include <Offline/RecoDataProducts/inc/StrawDigi.hh>
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wpedantic"
+//#pragma GCC diagnostic push
+//#pragma GCC diagnostic ignored "-Wpedantic"
 #include "Offline/TrkHitReco/inc/PeakFit.hh"
-#pragma GCC diagnostic pop
+//#pragma GCC diagnostic pop
 #include "Offline/DataProducts/inc/StrawId.hh"
 #include "Offline/DataProducts/inc/TrkTypes.hh"
 
