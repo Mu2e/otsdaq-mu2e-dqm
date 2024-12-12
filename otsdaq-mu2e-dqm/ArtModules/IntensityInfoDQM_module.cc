@@ -77,7 +77,7 @@ ots::IntensityInfoDQM::IntensityInfoDQM(Parameters const& conf)
   histSender_  = new HistoSender(address_, port_);
   
   if (diagLevel_>0){
-    __MOUT__ << "[IntensityInfoDQM::analyze] DQM for "<< histType_[0] << std::endl;
+    __COUT__ << "[IntensityInfoDQM::analyze] DQM for "<< histType_[0] << std::endl;
   }
 
   for (std::string name : histType_) {
@@ -91,7 +91,7 @@ ots::IntensityInfoDQM::IntensityInfoDQM(Parameters const& conf)
 }
 
 void ots::IntensityInfoDQM::beginJob() {
-  __MOUT__ << "[IntensityInfoDQM::beginJob] Beginning job" << std::endl;
+  __COUT__ << "[IntensityInfoDQM::beginJob] Beginning job" << std::endl;
   summary_histos->BookSummaryHistos(tfs,
 				    "CAPHRI hits; nCAPHRIHits; Events",
 				    100, 0, 100);
@@ -131,7 +131,7 @@ void ots::IntensityInfoDQM::analyze(art::Event const& event) {
   
   //send the summary hists
   for (size_t i = 0; i < summary_histos->histograms.size(); i++) {
-    __MOUT__ << "[IntensityInfoDQM::analyze] collecting summary histogram "<< summary_histos->histograms[i]._Hist << std::endl;
+    __COUT__ << "[IntensityInfoDQM::analyze] collecting summary histogram "<< summary_histos->histograms[i]._Hist << std::endl;
     hists_to_send[moduleTag_+"_summary"].push_back((TH1*)summary_histos->histograms[i]._Hist->Clone());
     summary_histos->histograms[i]._Hist->Reset();
   }
@@ -145,10 +145,10 @@ void ots::IntensityInfoDQM::summary_fill(IntensityInfoDQMHistoContainer       *h
 					 const mu2e::CaloHitCollection        *CAPHRIHits,
 					 const mu2e::IntensityInfoCalo        *CaloInfos, 
 					 const mu2e::IntensityInfoTrackerHits *TrkInfos) {
-  //  __MOUT__ << "filling Summary histograms..."<< std::endl;
+  //  __COUT__ << "filling Summary histograms..."<< std::endl;
 
   if (histos->histograms.size() == 0) {
-    __MOUT__ << "No histograms booked. Should they have been created elsewhere?"
+    __COUT__ << "No histograms booked. Should they have been created elsewhere?"
 	     << std::endl;
   } else {
       

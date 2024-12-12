@@ -102,7 +102,7 @@ ots::TrackerDQM::TrackerDQM(Parameters const& conf)
   histSender_ = new HistoSender(address_, port_);
 
   if (diagLevel_ > 0) {
-    __MOUT__ << "[TrackerDQM::analyze] DQM for " << histType_[0] << std::endl;
+    __COUT__ << "[TrackerDQM::analyze] DQM for " << histType_[0] << std::endl;
   }
 
   for (std::string name : histType_) {
@@ -116,7 +116,7 @@ ots::TrackerDQM::TrackerDQM(Parameters const& conf)
 }
 
 void ots::TrackerDQM::beginJob() {
-  __MOUT__ << "[TrackerDQM::beginJob] Beginning job" << std::endl;
+  __COUT__ << "[TrackerDQM::beginJob] Beginning job" << std::endl;
   summary_histos->BookSummaryHistos(tfs, "PanelOccupancy", 220, 0, 220);
   summary_histos->BookSummaryHistos(tfs, "PlaneOccupancy", 40, 0, 40);
 
@@ -197,7 +197,7 @@ void ots::TrackerDQM::analyze_tracker_(const mu2e::TrackerDataDecoder& cc) {
           } else if (name == "panels") {
             panel_fill(panel_histos, "Panel", sid);
           } else {
-            __MOUT_ERR__ << "Unrecognized histogram type" << std::endl;
+            __COUT_ERR__ << "Unrecognized histogram type" << std::endl;
           }
         }
       }
@@ -207,7 +207,7 @@ void ots::TrackerDQM::analyze_tracker_(const mu2e::TrackerDataDecoder& cc) {
   if (evtCounter_ % freqDQM_ != 0) return;
 
   if (diagLevel_ > 0) {
-    __MOUT__ << "[TrackerDQM::analyze] preparing the BUFFER..." << std::endl;
+    __COUT__ << "[TrackerDQM::analyze] preparing the BUFFER..." << std::endl;
   }
 
   // send a packet AND reset the histograms
@@ -215,7 +215,7 @@ void ots::TrackerDQM::analyze_tracker_(const mu2e::TrackerDataDecoder& cc) {
 
   // send the summary hists
   for (size_t i = 0; i < summary_histos->histograms.size(); i++) {
-    __MOUT__ << "[TrackerDQM::analyze] collecting summary histogram "
+    __COUT__ << "[TrackerDQM::analyze] collecting summary histogram "
              << summary_histos->histograms[i]._Hist << std::endl;
     hists_to_send[moduleTag_ + "_summary"].push_back(
         (TH1*)summary_histos->histograms[i]._Hist->Clone());
@@ -224,7 +224,7 @@ void ots::TrackerDQM::analyze_tracker_(const mu2e::TrackerDataDecoder& cc) {
 
   for (std::string name : histType_) {
     if (diagLevel_ > 0) {
-      __MOUT__ << "[TrackerDQM::analyze] collecting histograms from the block: "
+      __COUT__ << "[TrackerDQM::analyze] collecting histograms from the block: "
                << name << std::endl;
     }
     if (name == "pedestals") {
@@ -239,13 +239,13 @@ void ots::TrackerDQM::analyze_tracker_(const mu2e::TrackerDataDecoder& cc) {
       }
     } else if (name == "panels") {
       if (diagLevel_ > 0) {
-        __MOUT__ << Form(
+        __COUT__ << Form(
                         "[%s::analyze] preparing the collection of hists for  ",
                         moduleTag_.data())
                  << name << " histograms" << std::endl;
       }
       // prepare the vector of histograms
-      __MOUT__ << Form("[%sDQM::analyze] N hists =  ", moduleTag_.data())
+      __COUT__ << Form("[%sDQM::analyze] N hists =  ", moduleTag_.data())
                << panel_histos->histograms.size() << std::endl;
       for (size_t i = 0; i < panel_histos->histograms.size(); i++) {
         std::string refName = moduleTag_ + "_" + name + "/plane_" +
