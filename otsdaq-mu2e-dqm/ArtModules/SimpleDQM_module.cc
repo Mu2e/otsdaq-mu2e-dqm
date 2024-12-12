@@ -72,7 +72,7 @@ ots::SimpleDQM::SimpleDQM(Parameters const& conf)
   histSender_  = new HistoSender(address_, port_);
   
   if (diagLevel_>0){
-    __MOUT__ << "[SimpleDQM::analyze] DQM for "<< histType_[0] << std::endl;
+    __COUT__ << "[SimpleDQM::analyze] DQM for "<< histType_[0] << std::endl;
   }
 
   for (std::string name : histType_) {
@@ -86,7 +86,7 @@ ots::SimpleDQM::SimpleDQM(Parameters const& conf)
 }
 
 void ots::SimpleDQM::beginJob() {
-  __MOUT__ << "[SimpleDQM::beginJob] Beginning job" << std::endl;
+  __COUT__ << "[SimpleDQM::beginJob] Beginning job" << std::endl;
   summary_histos->BookSummaryHistos(tfs,
 				    "Trigger counts", 1, 0, 1);
 }
@@ -104,7 +104,7 @@ void ots::SimpleDQM::analyze(art::Event const& event) {
   
   //send the summary hists
   for (size_t i = 0; i < summary_histos->histograms.size(); i++) {
-    __MOUT__ << "[SimpleDQM::analyze] collecting summary histogram "<< summary_histos->histograms[i]._Hist << std::endl;
+    __COUT__ << "[SimpleDQM::analyze] collecting summary histogram "<< summary_histos->histograms[i]._Hist << std::endl;
     hists_to_send[moduleTag_+"_summary"].push_back((TH1*)summary_histos->histograms[i]._Hist->Clone());
     summary_histos->histograms[i]._Hist->Reset();
   }
@@ -115,10 +115,10 @@ void ots::SimpleDQM::analyze(art::Event const& event) {
 
 
 void ots::SimpleDQM::summary_trigger_fill(SimpleDQMHistoContainer *histos) {
-  //  __MOUT__ << "filling Summary histograms..."<< std::endl;
+  //  __COUT__ << "filling Summary histograms..."<< std::endl;
 
   if (histos->histograms.size() == 0) {
-    __MOUT__ << "No histograms booked. Should they have been created elsewhere?"
+    __COUT__ << "No histograms booked. Should they have been created elsewhere?"
 	     << std::endl;
   } else {
     histos->histograms[1]._Hist->Fill(0);

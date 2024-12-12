@@ -72,7 +72,7 @@ ots::TriggerDQM::TriggerDQM(Parameters const& conf)
   histSender_  = new HistoSender(address_, port_);
   
   if (diagLevel_>0){
-    __MOUT__ << "[TriggerDQM::analyze] DQM for "<< histType_[0] << std::endl;
+    __COUT__ << "[TriggerDQM::analyze] DQM for "<< histType_[0] << std::endl;
   }
 
   for (std::string name : histType_) {
@@ -86,7 +86,7 @@ ots::TriggerDQM::TriggerDQM(Parameters const& conf)
 }
 
 void ots::TriggerDQM::beginJob() {
-  __MOUT__ << "[TriggerDQM::beginJob] Beginning job" << std::endl;
+  __COUT__ << "[TriggerDQM::beginJob] Beginning job" << std::endl;
   summary_histos->BookSummaryHistos(tfs,
 				    "Trigger paths", 101, 99.5, 200.5);
   summary_histos->BookSummaryHistos(tfs,
@@ -110,7 +110,7 @@ void ots::TriggerDQM::analyze(art::Event const& event) {
   
   //send the summary hists
   for (size_t i = 0; i < summary_histos->histograms.size(); i++) {
-    __MOUT__ << "[TriggerDQM::analyze] collecting summary histogram "<< summary_histos->histograms[i]._Hist << std::endl;
+    __COUT__ << "[TriggerDQM::analyze] collecting summary histogram "<< summary_histos->histograms[i]._Hist << std::endl;
     hists_to_send[moduleTag_+"_summary"].push_back((TH1*)summary_histos->histograms[i]._Hist->Clone());
     summary_histos->histograms[i]._Hist->Reset();
   }
@@ -121,10 +121,10 @@ void ots::TriggerDQM::analyze(art::Event const& event) {
 
 
 void ots::TriggerDQM::summary_trigger_fill(TriggerDQMHistoContainer *histos, mu2e::TriggerResultsNavigator& trigNavig) {
-  //  __MOUT__ << "filling Summary histograms..."<< std::endl;
+  //  __COUT__ << "filling Summary histograms..."<< std::endl;
 
   if (histos->histograms.size() == 0) {
-    __MOUT__ << "No histograms booked. Should they have been created elsewhere?"
+    __COUT__ << "No histograms booked. Should they have been created elsewhere?"
 	     << std::endl;
   } else {
       
