@@ -69,7 +69,7 @@ namespace ots {
     TH1F* _evtNumHist;
     TH1F* _dataTypesHist;
     TGraph* _lastWaveform;
-    TGraph* _lastWaveformDeltaT;
+    TH1F* _lastWaveformDeltaT;
     std::fstream  _jsonFile;
 
     void book_histograms(art::ServiceHandle<art::TFileService> tfs);
@@ -107,7 +107,7 @@ void ots::STMDQMBareRoot::book_histograms(art::ServiceHandle<art::TFileService> 
     //    _dataTypesHist->GetXaxis()->SetBinLabel(3, "raw");
     
     _lastWaveform = tfs->makeAndRegister<TGraph>("last_waveform", "Last Waveform");
-    _lastWaveformDeltaT = tfs->makeAndRegister<TGraph>("delta_t", "Time between pulses");
+    _lastWaveformDeltaT = tfs->make<TH1F>("delta_t", "Time between pulses", 30, 10009, 10011); // !!!! THIS IS NOT PLOTTING CORRECTLY !!!!
 
     _c_stmdqm = tfs->makeAndRegister<TCanvas>("c_stmdqm", "c_stmdqm");
     _c_stmdqm->Divide(2, 2);
@@ -121,21 +121,20 @@ void ots::STMDQMBareRoot::update_canvas() {
   _dataTypesHist->Draw();
 
   _c_stmdqm->cd(3);
-  _lastWaveform->Draw("AL");
-  _lastWaveform->GetYaxis()->SetRangeUser(-5E3,4E4);
+  //_lastWaveform->GetYaxis()->SetRangeUser(-500,40000);
+  _lastWaveform->GetHistogram()->SetMinimum(-500);
+  _lastWaveform->GetHistogram()->SetMaximum(4E4);
   _lastWaveform->GetXaxis()->SetTitle("Time [s]");
   _lastWaveform->GetYaxis()->SetTitle("ADC Value");
+  _lastWaveform->Draw("AL");
 
   _c_stmdqm->cd(4);
-  _lastWaveformDeltaT->Draw("AL");
-  _lastWaveformDeltaT->GetYaxis()->SetRangeUser(-5E3,4E4);
-  _lastWaveformDeltaT->GetXaxis()->SetTitle("#Delta t [s]");
-  _lastWaveformDeltaT->GetYaxis()->SetTitle("ADC Value");
-
+  _lastWaveformDeltaT->GetXaxis()->SetTitle("#Delta t [us]");
+  _lastWaveformDeltaT->Draw();
     
   if (_toJSON) {
     auto before_json    = std::chrono::steady_clock::now();
-    _jsonFile.open("/home/mu2estm/Mu2eDAQ/srcs/otsdaq-mu2e-stm/UserWebGUI/json_dqm/c_stmdqm.json", std::fstream::out);
+    _jsonFile.open("/home/mu2eshift/ots_gr3/srcs/otsdaq-mu2e/UserWebGUI/json_dqm/c_stmdqm.json", std::fstream::out);
     auto after_json_open    = std::chrono::steady_clock::now();
     auto json = TBufferJSON::ToJSON(_c_stmdqm);
     //  auto json = TBufferJSON::ToJSON(_evtNumHist);
@@ -174,13 +173,9 @@ void ots::STMDQMBareRoot::analyze(art::Event const& event) {
     //# Pulse threshold
     int threshold  = 20000;
 
-    // std::cout << "DataType: " << *(stmFrag.DataType()) << "\n";
-    // std::cout << "Event_number: " << *(stmFrag.EvNum()) << "\n";
-    // std::cout << "[STMDQMBareRoot::analyze] data = ";
-    // for (int i = 0; i < 20; ++i) {
-    //   std::cout << *(stmFrag.DataBegin() + i) << "  ";
-    // }
-    // std::cout << std::endl;
+    std::cout << "DataType: " << *(stmFrag.DataType()) << "\n";
+    std::cout << "Event_number: " << *(stmFrag.EvNum()) << "\n";
+
     if (*(stmFrag.DataType()) <= 0) { // raw
       int16_t event_number = *(stmFrag.EvNum());
       //      std::cout << "[STMDQMBareRoot::analyze] EvNum = " << event_number << std::endl;
@@ -188,10 +183,8 @@ void ots::STMDQMBareRoot::analyze(art::Event const& event) {
 
       _dataTypesHist->Fill(0);
 
-      int expected_pulses=10;
       int16_t event_len = *(stmFrag.EvLen());
       _lastWaveform->Set(event_len); // update the number of points in the TGraph
-      _lastWaveformDeltaT->Set(expected_pulses); // update the number of points in the TGraph
       auto waveformBegin = stmFrag.DataBegin();
       int pulseCount = 0;
       for (int i_point = 0; i_point < _lastWaveform->GetN(); ++i_point) {
@@ -202,14 +195,22 @@ void ots::STMDQMBareRoot::analyze(art::Event const& event) {
 	  //# Average pulse time den
 	  avg_den += 1;
 	} else {
-	  //# Calculate the pulse time average
-	  int avg_time = int(avg_num/avg_den);
-	  //# Calculate the seperation between the pulses
-	  pulse_sep = avg_time-prev_pulse_time;
-	  if(prev_pulse_time!=0) _lastWaveformDeltaT->SetPoint(pulseCount-1, pulseCount, pulse_sep*(1/300.)/1000);
-	  //# Store previous pulse time
-	  prev_pulse_time = avg_time;
-	  pulseCount++;	    
+	  if(avg_num!=0){
+	    //# Calculate the pulse time average
+	    int avg_time = int(avg_num/avg_den);
+	    //# Calculate the seperation between the pulses
+	    pulse_sep = avg_time-prev_pulse_time;
+	    if(prev_pulse_time!=0) {
+	      std::cout << "Pulse_separation: " << pulse_sep*(1000/300.) << "\n";
+	      double t = pulse_sep*(1000/300.);
+	      _lastWaveformDeltaT->Fill(t);
+	    }
+	    //# Store previous pulse time
+	    prev_pulse_time = avg_time;
+	    pulseCount++;
+	  }
+	  avg_num = 0;
+	  avg_den = 0;
 	}
       }
     }

@@ -56,7 +56,7 @@ namespace ots {
     std::vector<std::string>  histType_;
     int                       freqDQM_,  diagLevel_, evtCounter_;
     art::ServiceHandle<art::TFileService> tfs;
-    SimpleDQMHistoContainer* summary_histos  = new SimpleDQMHistoContainer();
+    SimpleDQMHistoContainer* summary_histos = new SimpleDQMHistoContainer();
     HistoSender*              histSender_;
     bool                      doOnspillHist_, doOffspillHist_;
     std::string               moduleTag;
@@ -67,7 +67,8 @@ namespace ots {
 ots::SimpleDQM::SimpleDQM(Parameters const& conf)
   : art::EDAnalyzer(conf), conf_(conf()), port_(conf().port()), address_(conf().address()),
     moduleTag_(conf().moduleTag()), histType_(conf().histType()), 
-    freqDQM_(conf().freqDQM()), diagLevel_(conf().diag()), evtCounter_(0), 
+    freqDQM_(conf().freqDQM()), diagLevel_(conf().diag()), evtCounter_(0),
+    // summary_histos(new SimpleDQMHistoContainer())
     doOnspillHist_(false), doOffspillHist_(false) {
   histSender_  = new HistoSender(address_, port_);
   
@@ -87,8 +88,7 @@ ots::SimpleDQM::SimpleDQM(Parameters const& conf)
 
 void ots::SimpleDQM::beginJob() {
   __COUT__ << "[SimpleDQM::beginJob] Beginning job" << std::endl;
-  summary_histos->BookSummaryHistos(tfs,
-				    "Trigger counts", 1, 0, 1);
+  summary_histos->BookSummaryHistos(tfs,"trigger_counts", "Trigger counts", 1, 0, 1);
 }
 
 void ots::SimpleDQM::analyze(art::Event const& event) {
@@ -121,7 +121,7 @@ void ots::SimpleDQM::summary_trigger_fill(SimpleDQMHistoContainer *histos) {
     __COUT__ << "No histograms booked. Should they have been created elsewhere?"
 	     << std::endl;
   } else {
-    histos->histograms[1]._Hist->Fill(0);
+    histos->histograms[0]._Hist->Fill(0);
   }
 }
 

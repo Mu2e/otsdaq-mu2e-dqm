@@ -17,20 +17,20 @@ namespace ots {
     virtual ~SimpleDQMHistoContainer(void){};
     struct summaryInfoHist_ {
       TH1F *_Hist;
-      int   plane;
-      int   panel;
-      int   straw;
-      summaryInfoHist_() { _Hist = NULL; }
+      std::string _type;
+      summaryInfoHist_() { _Hist = NULL; _type = "add"; }
     };
 
     std::vector<summaryInfoHist_> histograms;
 
-    void BookSummaryHistos(art::ServiceHandle<art::TFileService> tfs, std::string Title,
-			   int nBins, float min, float max) {
+    void BookSummaryHistos(art::ServiceHandle<art::TFileService> tfs, std::string Name, std::string Title,
+			   const int nBins, const float min, const float max, const char* folder = "Trigger_summary",
+			   std::string type = "add") {
       histograms.push_back(summaryInfoHist_());
-      art::TFileDirectory testDir = tfs->mkdir("Trigger_summary");
-      this->histograms[histograms.size() - 1]._Hist = 
-	testDir.make<TH1F>(Title.c_str(), Title.c_str(), nBins, min, max);
+      art::TFileDirectory testDir = tfs->mkdir(folder);
+      histograms.back()._Hist = 
+	testDir.make<TH1F>(Name.c_str(), Title.c_str(), nBins, min, max);
+      histograms.back()._type = type;
     }
   
     /* void BookHistos(art::ServiceHandle<art::TFileService> tfs, std::string Title, */
