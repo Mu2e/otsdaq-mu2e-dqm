@@ -11,7 +11,8 @@ namespace ots {
 int pedestal_est(mu2e::TrkTypes::ADCWaveform adc) {
   int sum{0};
 
-  if (adc.size() == 0) return 0;
+  if (adc.size() == 0)
+    return 0;
 
   size_t i_max = adc.size() > 3 ? 3 : adc.size();
 
@@ -32,29 +33,23 @@ unsigned short max_adc(const mu2e::TrkTypes::ADCWaveform &adcs) {
   return maxadc;
 }
 
-
-
-
-
-void summary_fill(TrackerDQMHistoContainer *histos,  const mu2e::StrawId& sid) {
+void summary_fill(TrackerDQMHistoContainer *histos, const mu2e::StrawId &sid) {
   //  __COUT__ << "filling Summary histograms..."<< std::endl;
 
   if (histos->histograms.size() == 0) {
     __COUT__ << "No histograms booked. Should they have been created elsewhere?"
              << std::endl;
   } else {
-    
+
     histos->histograms[0]._Hist->Fill(sid.uniquePanel());
     histos->histograms[1]._Hist->Fill(sid.plane());
-    
   }
 }
 
-
-void pedestal_fill(TrackerDQMHistoContainer *histos, int data, std::string title,
-		   const mu2e::StrawId& sid) {
-  // __COUT__ << title.c_str() + "_"+std::to_string(sid.plane()) + " " 
-  //   + std::to_string(sid.panel()) + " " 
+void pedestal_fill(TrackerDQMHistoContainer *histos, int data,
+                   std::string title, const mu2e::StrawId &sid) {
+  // __COUT__ << title.c_str() + "_"+std::to_string(sid.plane()) + " "
+  //   + std::to_string(sid.panel()) + " "
   //   + std::to_string(sid.straw())
   //          << std::endl;
 
@@ -65,14 +60,15 @@ void pedestal_fill(TrackerDQMHistoContainer *histos, int data, std::string title
     for (int histIdx = 0; histIdx < int(histos->histograms.size()); ++histIdx) {
       if ((sid.straw() == histos->histograms[histIdx].straw) &&
           (sid.panel() == histos->histograms[histIdx].panel) &&
-          (sid.plane() == histos->histograms[histIdx].plane) ) { // if the histogram does exist, fill it
+          (sid.plane() == histos->histograms[histIdx]
+                              .plane)) { // if the histogram does exist, fill it
         histos->histograms[histIdx]._Hist->Fill(data);
         // __COUT__ << "number of histos: " << histos->histograms.size()
         //          << std::endl;
         break;
       }
 
-      if (histIdx == int(histos->histograms.size() - 1)) { 
+      if (histIdx == int(histos->histograms.size() - 1)) {
         __COUT__ << "Cannot find histogram: "
                  << title + std::to_string(sid.plane()) + " " +
                         std::to_string(sid.panel()) + " " +
@@ -83,30 +79,32 @@ void pedestal_fill(TrackerDQMHistoContainer *histos, int data, std::string title
   }
 }
 
-void panel_fill(TrackerDQMHistoContainer *histos, std::string  title,
-                const mu2e::StrawId& sid) {
+void panel_fill(TrackerDQMHistoContainer *histos, std::string title,
+                const mu2e::StrawId &sid) {
   if (histos->histograms.size() == 0) {
     __COUT__ << "No histograms booked. Should they have been created elsewhere?"
              << std::endl;
   } else {
-    bool   foundHist(false);
+    bool foundHist(false);
     for (int histIdx = 0; histIdx < int(histos->histograms.size()); ++histIdx) {
-      //__COUT__ << "[TrackerDWM::panel_fill] hist block:  "<<histos->histograms[histIdx].plane <<", "<< histos->histograms[histIdx].panel<< std::endl;
+      //__COUT__ << "[TrackerDWM::panel_fill] hist block:
+      //"<<histos->histograms[histIdx].plane <<", "<<
+      // histos->histograms[histIdx].panel<< std::endl;
 
-      if ((sid.panel()   == histos->histograms[histIdx].panel) &&
-          (sid.plane()   == histos->histograms[histIdx].plane) ) {
+      if ((sid.panel() == histos->histograms[histIdx].panel) &&
+          (sid.plane() == histos->histograms[histIdx].plane)) {
         histos->histograms[histIdx]._Hist->Fill(sid.straw());
-	//	__COUT__ << "[TrackerDWM::panel_fill] filled hist "<<sid.plane() <<", "<< sid.panel()<< std::endl;
-	foundHist = true;
+        //	__COUT__ << "[TrackerDWM::panel_fill] filled hist "<<sid.plane()
+        //<<", "<< sid.panel()<< std::endl;
+        foundHist = true;
         break;
       }
-      
     }
-    if (!foundHist){
+    if (!foundHist) {
       __COUT__ << "Cannot find histogram: "
-	       << title + "_"+std::to_string(sid.plane()) + "_" +
-	std::to_string(sid.panel())
-	       << std::endl;
+               << title + "_" + std::to_string(sid.plane()) + "_" +
+                      std::to_string(sid.panel())
+               << std::endl;
     }
   }
 }

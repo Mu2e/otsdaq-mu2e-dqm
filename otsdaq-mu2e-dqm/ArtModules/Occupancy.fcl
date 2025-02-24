@@ -17,63 +17,63 @@ outputs      : { @table::Trigger.outputs   }
 
 physics :
 {
-  producers : { @table::producers 
+  producers : { @table::producers
 
 	makeSD:
 	{
-	    module_type: Mu2eProducer
-	    diagLevel: 0
-	    parseCAL: 0
-	    parseTRK: 1
+		module_type: Mu2eProducer
+		diagLevel: 0
+		parseCAL: 0
+		parseTRK: 1
 	}
-	
+
 	CaloDigiFromShower:
 	{
-	    module_type: Mu2eProducer
-	    diagLevel: 0
-	    parseCAL: 1
-	    parseTRK: 0
+		module_type: Mu2eProducer
+		diagLevel: 0
+		parseCAL: 1
+		parseTRK: 0
 	}
-	
-	
-    }
-    
-    filters   : { @table::filters }
 
-  analyzers : { 
 
-                Occupancy : {
-                    module_type : Occupancy
-                    triggerPathsList : [tprSeedDeM_path  ]
+	}
 
-                }
+	filters   : { @table::filters }
 
-    }
+  analyzers : {
+
+				Occupancy : {
+					module_type : Occupancy
+					triggerPathsList : [tprSeedDeM_path  ]
+
+				}
+
+	}
 }
 
 
-    #unbiased trigger path
-    unbiased_path                : [ @sequence::paths.unbiased                       ]
-    
-    #minimum bias filters
-    minimumbiasSDCount_path      : [ @sequence::paths.minimumbiasSDCount             ]
+	#unbiased trigger path
+	unbiased_path                : [ @sequence::paths.unbiased                       ]
 
-    #path for selecting events with large ammount of strawDigis
-    largeSDCount_path            : [ @sequence::paths.largeSDCount                   ]
-    
-    #path for the calorimeter only trigger
-    caloMVACE_path               : [ CaloDigiFromShower, @sequence::paths.caloMVACE   ]
- 
-    #path for calorimeter cosmic muon calibration
-    caloCosmicMuon_path          : [ CaloDigiFromShower, @sequence::paths.caloCalibCosmic   ]
+	#minimum bias filters
+	minimumbiasSDCount_path      : [ @sequence::paths.minimumbiasSDCount             ]
 
-    #paths for TrkPatRec downstream e- and e+
-    tprSeedDeM_path                 : [ makeSD,  @sequence::paths.tprSeedDeM                          ]
-    tprSeedDeP_path                 : [ makeSD,  @sequence::paths.tprSeedDeP                          ]
+	#path for selecting events with large ammount of strawDigis
+	largeSDCount_path            : [ @sequence::paths.largeSDCount                   ]
 
-    #paths for CalPatRec downstream e- and e+
-    cprSeedDeM_path                 : [ makeSD, CaloDigiFromShower, @sequence::paths.cprSeedDeM       ]
-    cprSeedDeP_path                 : [ makeSD, CaloDigiFromShower, @sequence::paths.cprSeedDeP       ]
+	#path for the calorimeter only trigger
+	caloMVACE_path               : [ CaloDigiFromShower, @sequence::paths.caloMVACE   ]
+
+	#path for calorimeter cosmic muon calibration
+	caloCosmicMuon_path          : [ CaloDigiFromShower, @sequence::paths.caloCalibCosmic   ]
+
+	#paths for TrkPatRec downstream e- and e+
+	tprSeedDeM_path                 : [ makeSD,  @sequence::paths.tprSeedDeM                          ]
+	tprSeedDeP_path                 : [ makeSD,  @sequence::paths.tprSeedDeP                          ]
+
+	#paths for CalPatRec downstream e- and e+
+	cprSeedDeM_path                 : [ makeSD, CaloDigiFromShower, @sequence::paths.cprSeedDeM       ]
+	cprSeedDeP_path                 : [ makeSD, CaloDigiFromShower, @sequence::paths.cprSeedDeP       ]
 
 physics.EndPath : [ Occupancy ]
 
