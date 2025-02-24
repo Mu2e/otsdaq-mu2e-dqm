@@ -89,7 +89,7 @@ void panel_fill(TrackerDQMHistoContainer *histos, std::string title,
     for (int histIdx = 0; histIdx < int(histos->histograms.size()); ++histIdx) {
       //__COUT__ << "[TrackerDWM::panel_fill] hist block:
       //"<<histos->histograms[histIdx].plane <<", "<<
-      //histos->histograms[histIdx].panel<< std::endl;
+      // histos->histograms[histIdx].panel<< std::endl;
 
       if ((sid.panel() == histos->histograms[histIdx].panel) &&
           (sid.plane() == histos->histograms[histIdx].plane)) {
