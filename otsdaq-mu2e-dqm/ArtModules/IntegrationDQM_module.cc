@@ -397,7 +397,7 @@ void ots::IntegrationDQM::summary_calo_fill(art::Event const& event,
 		hists.sipms._Hist->Fill(Form("D%02iR%iC%02i", dtc, roc, channel),
 		                        1.);  // Fill the SiPM ID as the x-axis labels
 		if(new_sipm)
-		{   // FIXME: Sorting the labels here doesn't appear to work,
+		{  // FIXME: Sorting the labels here doesn't appear to work,
 			// perhaps needs to be done when drawing
 			try
 			{
