@@ -58,6 +58,10 @@ add_subdirectory(test)
 # Documentation directory
 #add_subdirectory(doc)
 
+configure_file(${CMAKE_CURRENT_SOURCE_DIR}/test/ierc_splines_20250213_DTC0_intcfo100us_pulser.root   ${CURRENT_BINARY_DIR} test/ierc_splines_20250213_DTC0_intcfo100us_pulser.root    COPYONLY)
+
+install(DIRECTORY test DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/otsdaq-mu2e-dqm)
+
 # Data
 #FILE(COPY ConfigurationDataExamples DESTINATION Data)
 #INSTALL(DIRECTORY ConfigurationDataExamples DESTINATION ${product}/${version}/Data)
