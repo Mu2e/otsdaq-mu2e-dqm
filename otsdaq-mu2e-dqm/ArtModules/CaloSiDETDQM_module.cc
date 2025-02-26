@@ -80,8 +80,7 @@ public:
   void beginJob() override;
   void endJob() override;
 
-  void summary_fill(art::Event const &event,
-                    CaloSiDETDQMHistoContainer *histos,
+  void summary_fill(art::Event const &event, CaloSiDETDQMHistoContainer *histos,
                     const mu2e::CaloDigiCollection *caloDigis);
   void PlotRate(art::Event const &e);
 
@@ -94,7 +93,8 @@ private:
   std::vector<std::string> histType_;
   int freqDQM_, diagLevel_, evtCounter_;
   art::ServiceHandle<art::TFileService> tfs;
-  CaloSiDETDQMHistoContainer *histo_container = new CaloSiDETDQMHistoContainer();
+  CaloSiDETDQMHistoContainer *histo_container =
+      new CaloSiDETDQMHistoContainer();
   HistoSender *histSender_;
   bool doOnspillHist_, doOffspillHist_;
   mu2e::ProditionsHandle<mu2e::CaloDAQMap> _calodaqconds_h;
@@ -123,28 +123,25 @@ ots::CaloSiDETDQM::CaloSiDETDQM(Parameters const &conf)
       doOffspillHist_ = true;
     }
   }
-
 }
 
 void ots::CaloSiDETDQM::beginJob() {
   __COUT__ << "[CaloSiDETDQM::beginJob] Beginning job" << std::endl;
 
   histo_container->BookHist(histo_container->h1_channel_occupancy, tfs,
-    "h1_channel_occupancy",
-    "Channel occupancy;Board*100+Channel;Total hits",
-    16000,0,16000,
-    "summary");
+                            "h1_channel_occupancy",
+                            "Channel occupancy;Board*100+Channel;Total hits",
+                            16000, 0, 16000, "summary");
 
-  histo_container->BookHist(histo_container->h1_channel_occupancy_lastevent, tfs,
-    "h1_channel_occupancy_lastevent",
-    "Channel occupancy in the last event;Board*100+Channel;Total hits",
-    16000,0,16000,
-    "summary");
+  histo_container->BookHist(
+      histo_container->h1_channel_occupancy_lastevent, tfs,
+      "h1_channel_occupancy_lastevent",
+      "Channel occupancy in the last event;Board*100+Channel;Total hits", 16000,
+      0, 16000, "summary");
 
-  histo_container->BookGraph(histo_container->g_nhits_event, tfs,
-    "g_nhits_event",
-    "Channel occupancy;Board*100+Channel;Total hits",
-    "summary");
+  histo_container->BookGraph(
+      histo_container->g_nhits_event, tfs, "g_nhits_event",
+      "Channel occupancy;Board*100+Channel;Total hits", "summary");
 }
 
 void ots::CaloSiDETDQM::analyze(art::Event const &event) {
@@ -193,22 +190,24 @@ void ots::CaloSiDETDQM::analyze(art::Event const &event) {
 
   // send the summary hists
 
-  hists_to_send[moduleTag_ + ":replace"].push_back((TH1 *)histo_container->h1_channel_occupancy._Hist->Clone());
-  hists_to_send[moduleTag_ + ":replace"].push_back((TH1 *)histo_container->h1_channel_occupancy_lastevent._Hist->Clone());
-  graphs_to_send[moduleTag_ + ":replace"].push_back((TGraph *)histo_container->g_nhits_event._Graph->Clone());
+  hists_to_send[moduleTag_ + ":replace"].push_back(
+      (TH1 *)histo_container->h1_channel_occupancy._Hist->Clone());
+  hists_to_send[moduleTag_ + ":replace"].push_back(
+      (TH1 *)histo_container->h1_channel_occupancy_lastevent._Hist->Clone());
+  graphs_to_send[moduleTag_ + ":replace"].push_back(
+      (TGraph *)histo_container->g_nhits_event._Graph->Clone());
 
   histSender_->sendHistograms(hists_to_send);
   histSender_->sendGraphs(graphs_to_send);
 }
 
-void ots::CaloSiDETDQM::summary_fill(art::Event const &event,
-                                    CaloSiDETDQMHistoContainer *histo_container,
-                                    const mu2e::CaloDigiCollection *caloDigis) {
+void ots::CaloSiDETDQM::summary_fill(
+    art::Event const &event, CaloSiDETDQMHistoContainer *histo_container,
+    const mu2e::CaloDigiCollection *caloDigis) {
 
   histo_container->h1_channel_occupancy_lastevent._Hist->Reset();
 
-  mu2e::CaloDAQMap const& calodaqconds = _calodaqconds_h.get(event.id());
-
+  mu2e::CaloDAQMap const &calodaqconds = _calodaqconds_h.get(event.id());
 
   TLOG(TLVL_DEBUG) << "There are " << caloDigis->size() << " calo digis";
   for (uint ihit = 0; ihit < caloDigis->size(); ihit++) {
@@ -216,14 +215,15 @@ void ots::CaloSiDETDQM::summary_fill(art::Event const &event,
     int BoardChan = calodaqconds.rawId(mu2e::CaloSiPMId(SiPMID)).id();
     int boardID = BoardChan / 20;
     int chanID = BoardChan % 20;
-    //float thisTime = caloDigis->at(ihit).t0();
+    // float thisTime = caloDigis->at(ihit).t0();
 
-    histo_container->h1_channel_occupancy._Hist->Fill(boardID*100+chanID);
-    histo_container->h1_channel_occupancy_lastevent._Hist->Fill(boardID*100+chanID);
+    histo_container->h1_channel_occupancy._Hist->Fill(boardID * 100 + chanID);
+    histo_container->h1_channel_occupancy_lastevent._Hist->Fill(boardID * 100 +
+                                                                chanID);
   }
 
-  histo_container->g_nhits_event._Graph->AddPoint(this_eventNumber, caloDigis->size());
-
+  histo_container->g_nhits_event._Graph->AddPoint(this_eventNumber,
+                                                  caloDigis->size());
 }
 
 void ots::CaloSiDETDQM::endJob() {}

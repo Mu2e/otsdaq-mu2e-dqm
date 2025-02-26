@@ -49,13 +49,13 @@ public:
     h->SetFillColor(kRed - 6);
   }
 
-  static void BookHist(InfoHist_ &h,
-                       art::ServiceHandle<art::TFileService> tfs,
+  static void BookHist(InfoHist_ &h, art::ServiceHandle<art::TFileService> tfs,
                        std::string Name, std::string Title, const int nBins,
                        const float xmin, const float xmax, const char *folder,
                        std::string type = "add") {
     art::TFileDirectory testDir = tfs->mkdir(folder);
-    h._Hist = testDir.make<TH1F>(Name.c_str(), Title.c_str(), nBins, xmin, xmax);
+    h._Hist =
+        testDir.make<TH1F>(Name.c_str(), Title.c_str(), nBins, xmin, xmax);
     h._type = type;
 
     // Initialize histogram style
@@ -66,8 +66,9 @@ public:
   }
 
   static void BookGraph(InfoGraph_ &g,
-                       art::ServiceHandle<art::TFileService> tfs,
-                       std::string Name, std::string Title, const char *folder) {
+                        art::ServiceHandle<art::TFileService> tfs,
+                        std::string Name, std::string Title,
+                        const char *folder) {
     art::TFileDirectory testDir = tfs->mkdir(folder);
     g._Graph = testDir.makeAndRegister<TGraph>(Name.c_str(), Title.c_str());
 
