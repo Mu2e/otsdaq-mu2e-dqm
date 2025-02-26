@@ -31,12 +31,12 @@
 
 // ROOT:
 // #include "art/Framework/Services/Optional/TFileService.h"
-#include "art_root_io/TFileService.h"
 #include <TBufferFile.h>
 #include <TH1.h>
 #include <TH1F.h>
 #include <TH2F.h>
 #include <TProfile.h>
+#include "art_root_io/TFileService.h"
 
 // Offline:
 #include <ConditionsService/inc/AcceleratorParams.hh>
@@ -94,93 +94,97 @@
 #include <unordered_map>
 #include <vector>
 
-namespace ots {
-class ProtoType : public art::EDAnalyzer {
-public:
-  explicit ProtoType(fhicl::ParameterSet const &pset);
-  virtual ~ProtoType();
+namespace ots
+{
+class ProtoType : public art::EDAnalyzer
+{
+  public:
+	explicit ProtoType(fhicl::ParameterSet const& pset);
+	virtual ~ProtoType();
 
-  void analyze(art::Event const &e) override;
-  void beginRun(art::Run const &) override;
-  void beginJob() override;
-  void endJob() override;
+	void analyze(art::Event const& e) override;
+	void beginRun(art::Run const&) override;
+	void beginJob() override;
+	void endJob() override;
 
-  void PlotRate(art::Event const &e);
+	void PlotRate(art::Event const& e);
 
-private:
-  art::RunNumber_t current_run_;
-  std::string outputFileName_;
-  art::ServiceHandle<art::TFileService> tfs;
-  bool writeOutput_;
-  bool doStreaming_;
-  bool overwrite_mode_;
+  private:
+	art::RunNumber_t                      current_run_;
+	std::string                           outputFileName_;
+	art::ServiceHandle<art::TFileService> tfs;
+	bool                                  writeOutput_;
+	bool                                  doStreaming_;
+	bool                                  overwrite_mode_;
 
-  art::InputTag _trigAlgTag;
-  art::InputTag _sdMCTag;
-  art::InputTag _sdTag;
+	art::InputTag _trigAlgTag;
+	art::InputTag _sdMCTag;
+	art::InputTag _sdTag;
 
-  double _duty_cycle;
-  string _processName;
+	double _duty_cycle;
+	string _processName;
 
-  float _nProcess;
-  double _bz0;
+	float  _nProcess;
+	double _bz0;
 
-  double _nPOT;
+	double _nPOT;
 
-  const mu2e::Tracker *_tracker;
-  const mu2e::StrawDigiMCCollection *_mcdigis;
+	const mu2e::Tracker*               _tracker;
+	const mu2e::StrawDigiMCCollection* _mcdigis;
 
-  const art::Event *_event;
-  ProtoTypeHistos *histos = new ProtoTypeHistos("test");
-  TCPPublishServer *tcp;
+	const art::Event* _event;
+	ProtoTypeHistos*  histos = new ProtoTypeHistos("test");
+	TCPPublishServer* tcp;
 };
-} // namespace ots
+}  // namespace ots
 
-ots::ProtoType::ProtoType(fhicl::ParameterSet const &pset)
-    : art::EDAnalyzer(pset), current_run_(0),
-      outputFileName_(
-          pset.get<std::string>("fileName", "otsdaqExampleDQM.root")),
-      writeOutput_(pset.get<bool>("write_to_file", true)),
-      doStreaming_(pset.get<bool>("stream_to_screen", true)),
-      overwrite_mode_(pset.get<bool>("overwrite_output_file", true)),
-      _sdMCTag(
-          pset.get<art::InputTag>("strawDigiMCCollection", "compressDigiMCs")),
-      _sdTag(pset.get<art::InputTag>("strawDigiCollection", "makeSD")),
-      _duty_cycle(pset.get<float>("dutyCycle", 1.)),
-      _processName(pset.get<string>("processName", "globalTrigger")),
-      _nProcess(pset.get<float>("nEventsProcessed", 1.)),
-      tcp(new TCPPublishServer(pset.get<int>("listenPort", 6000))) {
-  TLOG_INFO("ProtoType") << "TriggerRate Plotter construction is beginning "
-                         << TLOG_ENDL;
+ots::ProtoType::ProtoType(fhicl::ParameterSet const& pset)
+    : art::EDAnalyzer(pset)
+    , current_run_(0)
+    , outputFileName_(pset.get<std::string>("fileName", "otsdaqExampleDQM.root"))
+    , writeOutput_(pset.get<bool>("write_to_file", true))
+    , doStreaming_(pset.get<bool>("stream_to_screen", true))
+    , overwrite_mode_(pset.get<bool>("overwrite_output_file", true))
+    , _sdMCTag(pset.get<art::InputTag>("strawDigiMCCollection", "compressDigiMCs"))
+    , _sdTag(pset.get<art::InputTag>("strawDigiCollection", "makeSD"))
+    , _duty_cycle(pset.get<float>("dutyCycle", 1.))
+    , _processName(pset.get<string>("processName", "globalTrigger"))
+    , _nProcess(pset.get<float>("nEventsProcessed", 1.))
+    , tcp(new TCPPublishServer(pset.get<int>("listenPort", 6000)))
+{
+	TLOG_INFO("ProtoType") << "TriggerRate Plotter construction is beginning "
+	                       << TLOG_ENDL;
 
-  TLOG_DEBUG("ProtoType") << "TriggerRate Plotter construction complete"
-                          << TLOG_ENDL;
+	TLOG_DEBUG("ProtoType") << "TriggerRate Plotter construction complete" << TLOG_ENDL;
 }
 
 ots::ProtoType::~ProtoType() {}
 
-void ots::ProtoType::beginJob() {
-  TLOG_INFO("ProtType- StartingJob") << "Started" << TLOG_ENDL;
-  histos->BookHistos(tfs);
+void ots::ProtoType::beginJob()
+{
+	TLOG_INFO("ProtType- StartingJob") << "Started" << TLOG_ENDL;
+	histos->BookHistos(tfs);
 }
 
-void ots::ProtoType::analyze(art::Event const &event) {
-  TLOG_INFO("TriggerRate - Plotter")
-      << "TriggerRate Plotting Module is Analyzing Event #  " << event.event()
-      << TLOG_ENDL;
-  double value = 1;
-  histos->Test._FirstHist->Fill(value);
-  TBufferFile message(TBuffer::kWrite);
-  message.WriteObject(histos->Test._FirstHist);
+void ots::ProtoType::analyze(art::Event const& event)
+{
+	TLOG_INFO("TriggerRate - Plotter")
+	    << "TriggerRate Plotting Module is Analyzing Event #  " << event.event()
+	    << TLOG_ENDL;
+	double value = 1;
+	histos->Test._FirstHist->Fill(value);
+	TBufferFile message(TBuffer::kWrite);
+	message.WriteObject(histos->Test._FirstHist);
 
-  //__CFG_COUT__ << "Broadcasting!" << std::endl;
-  tcp->broadcastPacket(message.Buffer(), message.Length());
+	//__CFG_COUT__ << "Broadcasting!" << std::endl;
+	tcp->broadcastPacket(message.Buffer(), message.Length());
 }
 
-void ots::ProtoType::endJob() {
-  TLOG_INFO("ProtType- EndingJob") << "Completed" << TLOG_ENDL;
+void ots::ProtoType::endJob()
+{
+	TLOG_INFO("ProtType- EndingJob") << "Completed" << TLOG_ENDL;
 }
 
-void ots::ProtoType::beginRun(const art::Run &run) {}
+void ots::ProtoType::beginRun(const art::Run& run) {}
 
 DEFINE_ART_MODULE(ots::ProtoType)
