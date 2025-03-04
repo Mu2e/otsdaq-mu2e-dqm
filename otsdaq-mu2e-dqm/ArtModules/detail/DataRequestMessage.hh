@@ -44,6 +44,6 @@ struct DataResponseHeader
 	}
 	bool isValid() const { return response_magic == 0xABCDABCDABCDABCD; }
 };
-}
+}  // namespace ots
 
 #endif  // OTSDAQ_DQM_ARTMODULES_DETAIL_DATAREQUESTMESSAGE_HH

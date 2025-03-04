@@ -21,7 +21,7 @@ source :
 {
    module_type : RootInput
    inputCommands: [ "keep  *_*_*_*",
-      "drop  *ComboHitCollection_*_*_*"]
+	  "drop  *ComboHitCollection_*_*_*"]
 }
 
 # we don't need any simulation services for this job
@@ -31,48 +31,48 @@ services : @local::Services.Reco
 
 # timing information
 services.TimeTracker : {
-    dbOutput : {
+	dbOutput : {
 	filename : ""
 #	filename : "runGlobalTrigger.db" #uncomment to create the .db output
 	overwrite : true
-    }
+	}
 }
 
 services.scheduler.wantSummary: true
 
 services.ArtdaqSharedMemoryServiceInterface: {
-    service_provider: ArtdaqGlobalsService
+	service_provider: ArtdaqGlobalsService
 
-    metrics : {
-        file: { 
-		metricPluginType: "file" 
+	metrics : {
+		file: {
+		metricPluginType: "file"
 		level: 5
 		absolute_file_path: false
 		fileName: "metrics.json"
 		reporting_interval: 1.0
 	}
 
-        graphite: { # Can be named anything.
-     		level: 5 # Integer, verbosity level of metrics that will be recorded by this plugin.
+		graphite: { # Can be named anything.
+			level: 5 # Integer, verbosity level of metrics that will be recorded by this plugin.
 		metricPluginType: "graphite" # Must be "graphite" for the plugin to be loaded
 		reporting_interval: 1.0 # Double value, the frequency in seconds that the plugin sends out metrics
 		host: "localhost"    # The hostname that the plugin will send metric data to
 		port: 2003           # The port number for metric data
 		namespace: "counts." # The Graphite "namespace" for the metrics used. Namespaces are used for
 	}
-    }
+	}
 }
 
 
 physics : {
    @table::TrigSequences
 
-    producers : { @table::TrigProducers.producers  }
+	producers : { @table::TrigProducers.producers  }
 
-    filters   : { 
-        @table::TrigFilters.filters   
-        @table::Trig_physMenuPSConfig
-        
+	filters   : {
+		@table::TrigFilters.filters
+		@table::Trig_physMenuPSConfig
+
 	# Triggerable : {
 	#     module_type : StrawDigiMCFilter
 	#     MinNDigis : 15
@@ -82,23 +82,23 @@ physics : {
 	#     particleTypes : [ 11,-11, 13, -13, 211, -211] # e+-, mu+-, pi+-
 	#     MinNParticles : 2
 	# }
-    }
- 
-    analyzers : { 
+	}
 
-        readTriggerInfo : { 
-            module_type : ReadTriggerCounts
-            nPathIDs       : 250
-            nTrackTriggers : 25
-            processName    : globalTrigger
-            #processName    : "EventBuilder*"
-            cprHelixSeedCollection : "TTCalHelixMergerDe"
-            tprHelixSeedCollection : "TTHelixMergerDe"
-            kalSeedCollection      : NOTNOW
-            trackQualCollection    : NOTNOW
-        }
-      
-    }
+	analyzers : {
+
+		readTriggerInfo : {
+			module_type : ReadTriggerCounts
+			nPathIDs       : 250
+			nTrackTriggers : 25
+			processName    : globalTrigger
+			#processName    : "EventBuilder*"
+			cprHelixSeedCollection : "TTCalHelixMergerDe"
+			tprHelixSeedCollection : "TTHelixMergerDe"
+			kalSeedCollection      : NOTNOW
+			trackQualCollection    : NOTNOW
+		}
+
+	}
 
    #    filt : [ Triggerable ]
    #    trigger_paths : [ filt ]
@@ -109,23 +109,23 @@ physics : {
    end_paths : [ out ]
 }
 
-outputs : {  
+outputs : {
 
    filtData : {
-      module_type: RootOutput
-      fileName: "skim_debug_20240514.art"
-      SelectEvents : [ 
-         "apr_highP_stopTarg",
-         "apr_lowP_stopTarg",
-         "tprDe_highP_stopTarg",
-         "tprDe_lowP_stopTarg",
-         "cprDe_highP_stopTarg",
-         "cprDe_lowP_stopTarg"  
-      ]
-      outputCommands: [
-         "drop *_*_*_*",
-         "keep *_*_*_*" 
-      ]
+	  module_type: RootOutput
+	  fileName: "skim_debug_20240514.art"
+	  SelectEvents : [
+		 "apr_highP_stopTarg",
+		 "apr_lowP_stopTarg",
+		 "tprDe_highP_stopTarg",
+		 "tprDe_lowP_stopTarg",
+		 "cprDe_highP_stopTarg",
+		 "cprDe_lowP_stopTarg"
+	  ]
+	  outputCommands: [
+		 "drop *_*_*_*",
+		 "keep *_*_*_*"
+	  ]
    }
 }
 
@@ -138,18 +138,18 @@ services.TFileService.fileName : "globalTrigger_20240516_mdc2020r_NoPrimary_10nc
 #physics.analyzers.readTriggerInfo.SelectEvents : [ tprDe_highP_stopTarg,
  #						   cprDe_highP_stopTarg,
  #						   apr_highP_stopTarg,
- #						   cprDe_lowP_stopTarg, 
- #						   tprDe_lowP_stopTarg, 
- #						   apr_lowP_stopTarg, 
- #						   tprHelixDe_ipa, tprHelixDe_ipa_phiScaled ] 
+ #						   cprDe_lowP_stopTarg,
+ #						   tprDe_lowP_stopTarg,
+ #						   apr_lowP_stopTarg,
+ #						   tprHelixDe_ipa, tprHelixDe_ipa_phiScaled ]
 
 physics.analyzers.readTriggerInfo.triggerPathsList : [ tprDe_highP_stopTarg,
-						       cprDe_highP_stopTarg,
-						       apr_highP_stopTarg,
-						       cprDe_lowP_stopTarg, 
-						       tprDe_lowP_stopTarg, 
-						       apr_lowP_stopTarg, 
-						       tprHelixDe_ipa, tprHelixDe_ipa_phiScaled ] 
+							   cprDe_highP_stopTarg,
+							   apr_highP_stopTarg,
+							   cprDe_lowP_stopTarg,
+							   tprDe_lowP_stopTarg,
+							   apr_lowP_stopTarg,
+							   tprHelixDe_ipa, tprHelixDe_ipa_phiScaled ]
 
 physics.trigger_paths : [@sequence::Trig_physMenu.trigger_paths]
 #include "mu2e_trig_config/core/trigDigiInputsEpilog.fcl"
