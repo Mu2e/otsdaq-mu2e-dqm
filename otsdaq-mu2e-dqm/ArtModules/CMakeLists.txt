@@ -7,8 +7,8 @@
 
 cet_build_plugin(CaloDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
-otsdaq_mu2e::otsdaq-mu2e_ArtModules
+artdaq-core-mu2e::Data
+otsdaq-mu2e::ArtModules
 otsdaq::NetworkUtilities
 Offline::RecoDataProducts
 ROOT::Hist
@@ -20,8 +20,8 @@ ROOT::Gui
 
 cet_build_plugin(IntensityInfoDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
-otsdaq_mu2e::otsdaq-mu2e_ArtModules
+artdaq-core-mu2e::Data
+otsdaq-mu2e::ArtModules
 otsdaq::NetworkUtilities
 Offline::RecoDataProducts
 ROOT::Hist
@@ -33,8 +33,8 @@ ROOT::Gui
 
 cet_build_plugin(TrackerDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
-otsdaq_mu2e::otsdaq-mu2e_ArtModules
+artdaq-core-mu2e::Data
+otsdaq-mu2e::ArtModules
 otsdaq::NetworkUtilities
 Offline::DataProducts
 Offline::RecoDataProducts
@@ -54,9 +54,9 @@ link_directories($ENV{BTRK_LIB})
 
 cet_build_plugin(TriggerDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
+artdaq-core-mu2e::Data
 canvas::canvas
-otsdaq_mu2e::otsdaq-mu2e_ArtModules
+otsdaq-mu2e::ArtModules
 otsdaq::NetworkUtilities
 Offline::Mu2eUtilities
 ROOT::Hist
@@ -69,9 +69,9 @@ ROOT::Gui
 
 cet_build_plugin(SimpleDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
+artdaq-core-mu2e::Data
 canvas::canvas
-otsdaq_mu2e::otsdaq-mu2e_ArtModules
+otsdaq-mu2e::ArtModules
 otsdaq::NetworkUtilities
 Offline::Mu2eUtilities
 ROOT::Hist
@@ -83,7 +83,7 @@ ROOT::Gui
 
 cet_build_plugin(ReadTriggerCounts art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
+artdaq-core-mu2e::Data
 	artdaq::ArtModules
 Offline::BFieldGeom
       Offline::ConditionsService
@@ -97,8 +97,8 @@ Offline::BFieldGeom
 
 cet_build_plugin(CaloIERCDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
-otsdaq_mu2e::otsdaq-mu2e_ArtModules
+artdaq-core-mu2e::Data
+otsdaq-mu2e::ArtModules
 otsdaq::NetworkUtilities
 Offline::DataProducts
 Offline::RecoDataProducts
@@ -112,8 +112,8 @@ ROOT::Gui
 
 cet_build_plugin(CaloSiDETDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
-otsdaq_mu2e::otsdaq-mu2e_ArtModules
+artdaq-core-mu2e::Data
+otsdaq-mu2e::ArtModules
 otsdaq::NetworkUtilities
 Offline::DataProducts
 Offline::RecoDataProducts
@@ -129,8 +129,8 @@ ROOT::Gui
 
 cet_build_plugin(IntegrationDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
-artdaq_core_mu2e::artdaq-core-mu2e_Data
-otsdaq_mu2e::otsdaq-mu2e_ArtModules
+artdaq-core-mu2e::Data
+otsdaq-mu2e::ArtModules
 otsdaq::NetworkUtilities
 Offline::DataProducts
 Offline::RecoDataProducts
