@@ -1,26 +1,24 @@
 // Author: G. Pezzullo
-// This module produces histograms of data from the TriggerResults
+// This module produces an example DQM histogram and sends it to the visualizer
 
 #include "art/Framework/Core/EDAnalyzer.h"
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
-#include "art/Framework/Services/System/TriggerNamesService.h"
 #include "art_root_io/TFileService.h"
-#include "canvas/Persistency/Common/TriggerResults.h"
-#include "fhiclcpp/types/OptionalAtom.h"
 
 #include <TBufferFile.h>
+#include <TH1.h>
 #include <TH1F.h>
 
-#include "otsdaq-mu2e-dqm/ArtModules/SimpleDQMHistoContainer.h"
 #include "otsdaq-mu2e/ArtModules/HistoSender.hh"
 #include "otsdaq/Macros/CoutMacros.h"
 #include "otsdaq/Macros/ProcessorPluginMacros.h"
 #include "otsdaq/MessageFacility/MessageFacility.h"
 #include "otsdaq/NetworkUtilities/TCPSendClient.h"
 
-#include "Offline/Mu2eUtilities/inc/TriggerResultsNavigator.hh"
+#include "trace.h"
+#define TRACE_NAME "SimpleDQM"
 
 namespace ots
 {
@@ -38,14 +36,14 @@ class SimpleDQM : public art::EDAnalyzer
 		    Name("address"),
 		    Comment("This paramter sets the IP address where the "
 		            "histogram will be sent")};
-		fhicl::Atom<std::string> moduleTag{Name("moduleTag"), Comment("Module tag name")};
-		fhicl::Sequence<std::string> histType{
-		    Name("histType"),
-		    Comment("This parameter determines which quantity is histogrammed")};
+		fhicl::Atom<std::string> outputTag{Name("outputTag"), Comment("Tag to use in output name")};
 		fhicl::Atom<int> freqDQM{
 		    Name("freqDQM"),
 		    Comment("Frequency for sending histograms to the data-receiver")};
 		fhicl::Atom<int> diag{Name("diagLevel"), Comment("Diagnostic level"), 0};
+		fhicl::Atom<bool> sendHists{
+		    Name("sendHists"),
+		    Comment("Whether or not to send histograms to the receiver"), true};
 	};
 
 	typedef art::EDAnalyzer::Table<Config> Parameters;
@@ -57,21 +55,18 @@ class SimpleDQM : public art::EDAnalyzer
 	void beginJob() override;
 	void endJob() override;
 
-	void summary_trigger_fill(SimpleDQMHistoContainer* histos);
-	void PlotRate(art::Event const& e);
-
   private:
 	Config                                conf_;
 	int                                   port_;
 	std::string                           address_;
-	std::string                           moduleTag_;
-	std::vector<std::string>              histType_;
+	std::string                           outputTag_;
 	int                                   freqDQM_, diagLevel_, evtCounter_;
+        bool                                  sendHists_;
 	art::ServiceHandle<art::TFileService> tfs;
-	SimpleDQMHistoContainer*              summary_histos = new SimpleDQMHistoContainer();
 	HistoSender*                          histSender_;
-	bool                                  doOnspillHist_, doOffspillHist_;
-	std::string                           moduleTag;
+
+        // Simple event counter
+        TH1* hist_;
 };
 }  // namespace ots
 
@@ -80,82 +75,55 @@ ots::SimpleDQM::SimpleDQM(Parameters const& conf)
     , conf_(conf())
     , port_(conf().port())
     , address_(conf().address())
-    , moduleTag_(conf().moduleTag())
-    , histType_(conf().histType())
+    , outputTag_(conf().outputTag())
     , freqDQM_(conf().freqDQM())
     , diagLevel_(conf().diag())
     , evtCounter_(0)
-    , doOnspillHist_(false)
-    , doOffspillHist_(false)
+    , sendHists_(conf().sendHists())
 {
-	histSender_ = new HistoSender(address_, port_);
+        histSender_ = (sendHists_) ? new HistoSender(address_, port_) : nullptr;
 
-	if(diagLevel_ > 0)
-	{
-		__COUT__ << "[SimpleDQM::analyze] DQM for " << histType_[0] << std::endl;
-	}
-
-	for(std::string name : histType_)
-	{
-		if(name == "Onspill")
-		{
-			doOnspillHist_ = true;
-		}
-		if(name == "Offspill")
-		{
-			doOffspillHist_ = true;
-		}
-	}
+	__COUT__ << "[SimpleDQM::" << __func__ << "] Constructor" << std::endl;
 }
 
 void ots::SimpleDQM::beginJob()
 {
-	__COUT__ << "[SimpleDQM::beginJob] Beginning job" << std::endl;
-	summary_histos->BookSummaryHistos(tfs, "Trigger counts", 1, 0, 1);
+        __COUT__ << "[SimpleDQM::" << __func__ << "] Beginning job" << std::endl;
+
+	// Create the histograms of interest
+	art::TFileDirectory dir = tfs->mkdir(outputTag_);
+	hist_ = dir.make<TH1F>("event_count", "Event counter;Bin;Events", 1, 0, 1);
+	hist_->SetLineWidth(2);
+	hist_->SetFillColor(kAzure-9);
+	hist_->SetLineColor(kAzure+2);
+	hist_->SetFillStyle(3001);
 }
 
 void ots::SimpleDQM::analyze(art::Event const& event)
 {
+        // fill the histograms of interest
 	++evtCounter_;
+	hist_->Fill(1);
+        TLOG(TLVL_DEBUG + 20) << "[SimpleDQM::" << __func__ << "] Analyzing event " << evtCounter_ << std::endl;
 
-	summary_trigger_fill(summary_histos);
+	// Only send histograms at a given frequency
+	if(evtCounter_ % freqDQM_ != 0 || !sendHists_) return;
 
-	if(evtCounter_ % freqDQM_ != 0)
-		return;
-
-	// send a packet AND reset the histograms
+	// Add a clone of the histogram to a map of <path/in/output, <list of histograms>>
 	std::map<std::string, std::vector<TH1*>> hists_to_send;
+ 	TLOG(TLVL_DEBUG + 5) << "[SimpleDQM::" << __func__ << "] collecting summary histogram "
+			     << hist_->GetName() << std::endl;
+	// histograms can be replaced with ":replace" or added together with ":add" appended to the directory path
+	hists_to_send[outputTag_ + "_summary:replace"].push_back((TH1*) hist_->Clone());
 
-	// send the summary hists
-	for(size_t i = 0; i < summary_histos->histograms.size(); i++)
-	{
-		__COUT__ << "[SimpleDQM::analyze] collecting summary histogram "
-		         << summary_histos->histograms[i]._Hist << std::endl;
-		hists_to_send[moduleTag_ + "_summary"].push_back(
-		    (TH1*)summary_histos->histograms[i]._Hist->Clone());
-		summary_histos->histograms[i]._Hist->Reset();
-	}
-
+	// send the histograms to the receiver
 	histSender_->sendHistograms(hists_to_send);
 }
 
-void ots::SimpleDQM::summary_trigger_fill(SimpleDQMHistoContainer* histos)
-{
-	//  __COUT__ << "filling Summary histograms..."<< std::endl;
-
-	if(histos->histograms.size() == 0)
-	{
-		__COUT__ << "No histograms booked. Should they have been created elsewhere?"
-		         << std::endl;
-	}
-	else
-	{
-		histos->histograms[1]._Hist->Fill(0);
-	}
+void ots::SimpleDQM::endJob() {
+  __COUT__ << "[SimpleDQM::" << __func__ << "] Ending job, saw " << evtCounter_ << " events\n";
 }
 
-void ots::SimpleDQM::endJob() {}
-
-void ots::SimpleDQM::beginRun(const art::Run& run) {}
+void ots::SimpleDQM::beginRun(const art::Run&) {}
 
 DEFINE_ART_MODULE(ots::SimpleDQM)
