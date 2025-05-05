@@ -95,6 +95,8 @@ void ots::SimpleDQM::beginJob()
 	// Create the histograms of interest
 	art::TFileDirectory dir = tfs->mkdir(outputTag_);
 	hist_ = dir.make<TH1F>("event_count", "Event counter;Bin;Events", 1, 0, 1);
+
+	// Add histogram style
 	hist_->SetLineWidth(2);
 	hist_->SetFillColor(kAzure - 9);
 	hist_->SetLineColor(kAzure + 2);
