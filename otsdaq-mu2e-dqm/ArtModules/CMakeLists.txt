@@ -5,46 +5,46 @@
 # cet_build_plugin(TrackerDQM art::module LIBRARIES REG
 #   )
 
-cet_build_plugin(CaloDQM art::module LIBRARIES REG
-art_root_io::TFileService_service
-artdaq-core-mu2e::Data
-otsdaq-mu2e::ArtModules
-otsdaq::NetworkUtilities
-Offline::RecoDataProducts
-ROOT::Hist
-ROOT::Tree
-ROOT::Core
-ROOT::RIO
-ROOT::Gui
-)
+# cet_build_plugin(CaloDQM art::module LIBRARIES REG
+# art_root_io::TFileService_service
+# artdaq-core-mu2e::Data
+# otsdaq-mu2e::ArtModules
+# otsdaq::NetworkUtilities
+# Offline::RecoDataProducts
+# ROOT::Hist
+# ROOT::Tree
+# ROOT::Core
+# ROOT::RIO
+# ROOT::Gui
+# )
 
-cet_build_plugin(IntensityInfoDQM art::module LIBRARIES REG
-art_root_io::TFileService_service
-artdaq-core-mu2e::Data
-otsdaq-mu2e::ArtModules
-otsdaq::NetworkUtilities
-Offline::RecoDataProducts
-ROOT::Hist
-ROOT::Tree
-ROOT::Core
-ROOT::RIO
-ROOT::Gui
-)
+# cet_build_plugin(IntensityInfoDQM art::module LIBRARIES REG
+# art_root_io::TFileService_service
+# artdaq-core-mu2e::Data
+# otsdaq-mu2e::ArtModules
+# otsdaq::NetworkUtilities
+# Offline::RecoDataProducts
+# ROOT::Hist
+# ROOT::Tree
+# ROOT::Core
+# ROOT::RIO
+# ROOT::Gui
+# )
 
-cet_build_plugin(TrackerDQM art::module LIBRARIES REG
-art_root_io::TFileService_service
-artdaq-core-mu2e::Data
-otsdaq-mu2e::ArtModules
-otsdaq::NetworkUtilities
-Offline::DataProducts
-Offline::RecoDataProducts
-Offline::TrkHitReco
-ROOT::Hist
-ROOT::Tree
-ROOT::Core
-ROOT::RIO
-ROOT::Gui
-)
+# cet_build_plugin(TrackerDQM art::module LIBRARIES REG
+# art_root_io::TFileService_service
+# artdaq-core-mu2e::Data
+# otsdaq-mu2e::ArtModules
+# otsdaq::NetworkUtilities
+# Offline::DataProducts
+# Offline::RecoDataProducts
+# Offline::TrkHitReco
+# ROOT::Hist
+# ROOT::Tree
+# ROOT::Core
+# ROOT::RIO
+# ROOT::Gui
+# )
 
 # BTrk and KinKal have non-standard Find*.cmake...
 include_directories($ENV{KINKAL_INC})
