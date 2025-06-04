@@ -45,16 +45,15 @@ namespace mu2e {
   class CaloDQMOffline : public art::EDAnalyzer {
   public:
     struct Config {
+      fhicl::Atom<std::string> address { fhicl::Name("address") };
+      fhicl::Atom<int> port { fhicl::Name("port") };
+      fhicl::Atom<std::string> moduleTag { fhicl::Name("moduleTag") };
+      fhicl::Atom<int> freqDQM { fhicl::Name("freqDQM") };
+
       fhicl::Atom<std::string> caloDigiModuleLabel { fhicl::Name("caloDigiModuleLabel") };
       fhicl::Atom<bool> enableBoardHistos { fhicl::Name("enableBoardHistos"), true };
       fhicl::Atom<int> maxBoardHistos { fhicl::Name("maxBoardHistos"), -1 };
       fhicl::Atom<bool> enableLogging { fhicl::Name("enableLogging"), false };
-      fhicl::Atom<int> dqmSendFrequency { fhicl::Name("dqmSendFrequency"), 100 };
-      fhicl::Atom<std::string> dqmAddress { fhicl::Name("dqmAddress"), "mu2e-trk-05.fnal.gov" };
-      fhicl::Atom<int> dqmPort { fhicl::Name("dqmPort"), 3095 };
-      fhicl::Atom<std::string> outputTag { fhicl::Name("outputTag"), "caloDQM" };
-      fhicl::Atom<bool> sendHists { fhicl::Name("sendHists"), true };
-
     };
 
     explicit CaloDQMOffline(const art::EDAnalyzer::Table<Config>& config);
@@ -66,10 +65,10 @@ namespace mu2e {
     bool enableBoardHistos_;
     int maxBoardHistos_;
     bool enableLogging_;
-    int dqmSendFrequency_;
-    std::string dqmAddress_;
-    int dqmPort_;
-    std::string outputTag_;
+    int freqDQM_;
+    std::string address_;
+    int port_;
+    std::string moduleTag_;
     bool sendHists_;
 
     ots::HistoSender* histSender_;
@@ -115,15 +114,13 @@ namespace mu2e {
       enableBoardHistos_(config().enableBoardHistos()),
       maxBoardHistos_(config().maxBoardHistos()),
       enableLogging_(config().enableLogging()),
-      dqmSendFrequency_(config().dqmSendFrequency()),
-      dqmAddress_(config().dqmAddress()),
-      dqmPort_(config().dqmPort()),
-      outputTag_(config().outputTag()),
-      sendHists_(config().sendHists()){
+      freqDQM_(config().freqDQM()),
+      address_(config().address()),
+      port_(config().port()),
+      moduleTag_(config().moduleTag()),
+      sendHists_(true){
     
-    outputTag_ = config().outputTag();
-    sendHists_ = config().sendHists();
-    histSender_ = (sendHists_) ? new ots::HistoSender(dqmAddress_, dqmPort_) : nullptr;
+    histSender_ = (sendHists_) ? new ots::HistoSender(address_, port_) : nullptr;
 
 
     art::ServiceHandle<art::TFileService> tfs;
@@ -330,43 +327,50 @@ namespace mu2e {
       }
     }
     ++eventCounter_;
-    if (eventCounter_ % dqmSendFrequency_ != 0) return;
+    if (eventCounter_ % freqDQM_ != 0) return;
 
     std::map<std::string, std::vector<TH1*>> hists_to_send;
 
-    hists_to_send[outputTag_ + "/Global:replace"] = {
+    hists_to_send[moduleTag_ + "/Global:replace"] = {
       h_occupancy_disk0_, h_occupancy_disk1_,
       h_baseline_disk0_, h_baseline_disk1_,
       h_rms_disk0_, h_rms_disk1_,
       h_maxval_disk0_, h_maxval_disk1_,
       h_asymmetry,
-      //  h_global_channel_dist_, h_global_board_dist_,
-      //h_global_board_vs_channel_, h_global_waveform_density_, h_baseline_vs_disk
+      h_global_channel_dist_, h_global_board_dist_,
+      h_global_board_vs_channel_, h_global_waveform_density_, h_baseline_vs_disk
     };
 
-    for (auto& [_, hist] : channelWaveformHistos_)
-      hists_to_send[outputTag_ + "/Waveforms:replace"].push_back(hist);
-    for (auto& [_, hist] : singleWaveformHistos_)
-      hists_to_send[outputTag_ + "/OneHitWaveforms:replace"].push_back(hist);
-    for (auto& [_, hmap] : boardHistos_)
+
+    for (auto& [key, hist] : channelWaveformHistos_) {
+      int disk, boardID, chanID;
+      sscanf(key.c_str(), "D%d_B%03d_C%02d", &disk, &boardID, &chanID);
+      std::string groupPath = Form("%s/Waveforms/Disk%d/Board%03d:replace", moduleTag_.c_str(), disk, boardID);
+      hists_to_send[groupPath].push_back(hist);
+    }
+
+    for (auto& [key, hist] : singleWaveformHistos_) {
+      int disk, boardID, chanID;
+      sscanf(key.c_str(), "D%d_B%03d_C%02d", &disk, &boardID, &chanID);
+      std::string groupPath = Form("%s/OneHitWaveforms/Disk%d/Board%03d:replace", moduleTag_.c_str(), disk, boardID);
+      hists_to_send[groupPath].push_back(hist);
+    }
+
+    for (auto& [boardKey, hmap] : boardHistos_) {
+      int disk = boardKey.first;
+      int boardID = boardKey.second;
+      std::string groupPath = Form("%s/Disk%d/Board%03d:replace", moduleTag_.c_str(), disk, boardID);
       for (auto& [_, h] : hmap)
-	hists_to_send[outputTag_ + "/Boards:replace"].push_back(h);
+	hists_to_send[groupPath].push_back(h);
+    }
+
 
     histSender_->sendHistograms(hists_to_send);
     std::cout << "Sending " << hists_to_send.size() << " histogram groups" << std::endl;
     for (const auto& [dir, vec] : hists_to_send)
       std::cout << "Group: " << dir << " - " << vec.size() << " hists" << std::endl;
 
-    for (const auto& [groupName, vec] : hists_to_send) {
-      std::cout << "- Group: " << groupName << ", #hists = " << vec.size() << std::endl;
-      for (const auto* h : vec) {
-	if (!h) {
-	  std::cerr << "NULL histogram pointer in group " << groupName << std::endl;
-	  continue;
-	}
-	std::cout << "   - " << h->GetName() << " (class: " << h->ClassName() << ")" << std::endl;
-      }
-    }
+
 
 
   }
