@@ -11,7 +11,7 @@
 #include <TBufferFile.h>
 #include <TH1.h>
 
-#include "artdaq-core-mu2e/Data/CRVDataDecoder.hh"
+#include "artdaq-core-mu2e/Overlays/Decoders/CRVDataDecoder.hh"
 
 #include "otsdaq-mu2e-dqm/ArtModules/CaloIERCPulseFitter.h"
 #include "otsdaq-mu2e-dqm/ArtModules/IntegrationDQMHistoContainer.h"
@@ -747,7 +747,6 @@ std::vector<mu2e::CRVDataDecoder::CRVGlobalRunInfo> ots::IntegrationDQM::decode_
 	for(size_t iSubEvent = 0; iSubEvent < nSubEvents; ++iSubEvent)
 	{
 		const mu2e::CRVDataDecoder& CRVDataDecoder((*decoders)[iSubEvent]);
-		CRVDataDecoder.setup_event();
 
 		for(size_t iDataBlock = 0; iDataBlock < CRVDataDecoder.block_count();
 		    ++iDataBlock)
