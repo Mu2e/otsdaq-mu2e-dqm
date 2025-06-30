@@ -6,6 +6,7 @@
 #include "art/Framework/Services/Registry/ServiceHandle.h"
 #include "messagefacility/MessageLogger/MessageLogger.h"
 #include "otsdaq-mu2e/ArtModules/HistoSender.hh"
+#include "otsdaq/Macros/ProcessorPluginMacros.h"
 
 
 
@@ -45,12 +46,12 @@ namespace mu2e {
   class CaloDQMOffline : public art::EDAnalyzer {
   public:
     struct Config {
-      fhicl::Atom<std::string> address { fhicl::Name("address") };
-      fhicl::Atom<int> port { fhicl::Name("port") };
-      fhicl::Atom<std::string> moduleTag { fhicl::Name("moduleTag") };
-      fhicl::Atom<int> freqDQM { fhicl::Name("freqDQM") };
+      fhicl::Atom<std::string> address { fhicl::Name("address"), "mu2edaq11-data.fnal.gov" };
+      fhicl::Atom<int> port { fhicl::Name("port"), 6000 };
+      fhicl::Atom<std::string> moduleTag { fhicl::Name("moduleTag"), "CaloDQM" };
+      fhicl::Atom<int> freqDQM { fhicl::Name("freqDQM"), 100 };
 
-      fhicl::Atom<std::string> caloDigiModuleLabel { fhicl::Name("caloDigiModuleLabel") };
+      fhicl::Atom<std::string> caloDigiModuleLabel { fhicl::Name("caloDigiModuleLabel"), "CaloDigi" };
       fhicl::Atom<bool> enableBoardHistos { fhicl::Name("enableBoardHistos"), true };
       fhicl::Atom<int> maxBoardHistos { fhicl::Name("maxBoardHistos"), -1 };
       fhicl::Atom<bool> enableLogging { fhicl::Name("enableLogging"), false };
@@ -203,6 +204,7 @@ namespace mu2e {
 
 
   void CaloDQMOffline::analyze(art::Event const& event) {
+    __COUT__ << "CaloDQMOffline is running inside OTSDAQ!" << std::endl;
     art::ServiceHandle<art::TFileService> tfs;
     const auto& caloDigis = *event.getValidHandle(consumes<CaloDigiCollection>(caloDigiModuleLabel_));
     const auto& calodaqconds = _calodaqconds_h.get(event.id());
