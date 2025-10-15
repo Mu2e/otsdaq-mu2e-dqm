@@ -11,6 +11,7 @@
 
 
 #include "Offline/RecoDataProducts/inc/CaloDigi.hh"
+#include "Offline/CaloVisualizer/inc/THMu2eCaloDisk.hh"
 #include "art_root_io/TFileService.h"
 #include "art_root_io/TFileDirectory.h"
 
@@ -21,7 +22,8 @@
 #include "TBrowser.h"
 #include "TH2D.h"
 #include "TCanvas.h"
-
+#include "TClass.h"
+#include "TFile.h"
 
 
 #include "ROOT/RCanvas.hxx"
@@ -40,10 +42,14 @@
 #include <memory>
 #include <utility>
 #include <tuple>
+#include <set>
+#include <cctype>
+#include <algorithm>
 
 namespace mu2e {
 
   class CaloDQMOffline : public art::EDAnalyzer {
+
   public:
     struct Config {
       fhicl::Atom<std::string> address { fhicl::Name("address"), "mu2edaq11-data.fnal.gov" };
@@ -55,6 +61,11 @@ namespace mu2e {
       fhicl::Atom<bool> enableBoardHistos { fhicl::Name("enableBoardHistos"), true };
       fhicl::Atom<int> maxBoardHistos { fhicl::Name("maxBoardHistos"), -1 };
       fhicl::Atom<bool> enableLogging { fhicl::Name("enableLogging"), false };
+        fhicl::Atom<bool>        sendHists{ fhicl::Name("sendHists"), false };
+
+      fhicl::Atom<bool> enableDiskMaps { fhicl::Name("enableDiskMaps"), true };
+      fhicl::Atom<std::string> diskCombine { fhicl::Name("diskCombine"), "asym" };
+      fhicl::Atom<std::string> diskFormula { fhicl::Name("diskFormula"), "" };
     };
 
     explicit CaloDQMOffline(const art::EDAnalyzer::Table<Config>& config);
@@ -62,6 +73,8 @@ namespace mu2e {
     void endJob() override;
 
   private:
+    enum class MapMode {Amp,Sum,Asym };
+    MapMode mode_{MapMode::Amp};
     std::string caloDigiModuleLabel_;
     bool enableBoardHistos_;
     int maxBoardHistos_;
@@ -75,6 +88,10 @@ namespace mu2e {
     ots::HistoSender* histSender_;
     int eventCounter_ = 0;
 
+    int nFillDisk0_{0};
+    int nFillDisk1_{0};
+    int nFillMiss_{0};
+
     std::map<std::pair<int, int>, std::map<std::string, TH1F*>> boardHistos_;
     std::map<std::pair<int, int>, std::unique_ptr<art::TFileDirectory>> cachedHistosDirs_;
     std::map<std::string, TH1F*> channelWaveformHistos_;
@@ -82,9 +99,13 @@ namespace mu2e {
     std::map<int, int> crystalIdBySiPM;
     std::set<std::string> channelWaveformStored_;
     std::map<std::string, TH1F*> singleWaveformHistos_;
-    std::map<std::pair<int, int>, std::unique_ptr<art::TFileDirectory>> cachedChannelsDirs_; 
-
-
+    std::map<std::pair<int, int>, std::unique_ptr<art::TFileDirectory>> cachedChannelsDirs_;
+    
+    mu2e::THMu2eCaloDisk* h_disk0_map_{nullptr};
+    mu2e::THMu2eCaloDisk* h_disk1_map_{nullptr};
+    bool enableDiskMaps_;
+    std::string diskCombine_;
+    std::string diskFormula_;
 
     std::unique_ptr<art::TFileDirectory> disk0Dir_;
     std::unique_ptr<art::TFileDirectory> disk1Dir_;
@@ -105,6 +126,37 @@ namespace mu2e {
     TH2I* h_global_board_vs_channel_;
     TH2D* h_global_waveform_density_;
 
+    void setDiskMapTitles(mu2e::THMu2eCaloDisk* h, int disk, CaloDQMOffline::MapMode mode) {
+      if (!h) return;
+
+      const char* ztitle = "Value [ADC]";
+      const char* main   = "SiPM value";
+
+      switch (mode) {
+      case CaloDQMOffline::MapMode::Amp:
+        main = "SiPM amplitude at peak (baseline-subtracted)";
+        ztitle = "Amplitude [ADC]";
+        break;
+
+      case CaloDQMOffline::MapMode::Sum:
+        main = "Crystal energy proxy: L+R amplitude";
+        ztitle = "L+R [ADC]";
+        break;
+
+      case CaloDQMOffline::MapMode::Asym:
+        main = "SiPM asymmetry (L-R)/(L+R)";
+        ztitle = "Asymmetry (L-R)/(L+R)";
+        h->SetMinimum(-1.0);
+        h->SetMaximum( 1.0);
+        break;
+      }
+
+      h->SetTitle(Form("Disk %d - %s", disk, main));
+      h->GetZaxis()->SetTitle(ztitle);
+      h->SetOption("COLZ L");
+      h->SetStats(0);
+    }
+
 
     mu2e::ProditionsHandle<mu2e::CaloDAQMap> _calodaqconds_h;
   };
@@ -119,8 +171,18 @@ namespace mu2e {
       address_(config().address()),
       port_(config().port()),
       moduleTag_(config().moduleTag()),
-      sendHists_(true){
-    
+      sendHists_(config().sendHists()),
+      enableDiskMaps_(config().enableDiskMaps()),
+      diskCombine_(config().diskCombine()),
+      diskFormula_(config().diskFormula())
+  {
+    std::string m = diskCombine_;
+    std::transform(m.begin(), m.end(), m.begin(),
+                   [](unsigned char c){ return std::tolower(c); });
+    if (m == "sum")        mode_ = MapMode::Sum;
+    else if (m == "asym")  mode_ = MapMode::Asym;
+    else                   mode_ = MapMode::Amp;
+
     histSender_ = (sendHists_) ? new ots::HistoSender(address_, port_) : nullptr;
 
 
@@ -133,7 +195,6 @@ namespace mu2e {
     h_occupancy_disk0_ = disk0Dir_->make<TH1F>("h_occ_d0", "Occupancy (Disk 0)", 3920, 11990, 15900);
     h_occupancy_disk0_->GetXaxis()->SetTitle("Encoded Channel (boardID * 100 + chanID)");
     h_occupancy_disk0_->GetYaxis()->SetTitle("Hit Count");
-    
 
     h_occupancy_disk1_ = disk1Dir_->make<TH1F>("h_occ_d1", "Occupancy (Disk 1)", 3920, 11990, 15900);
     h_occupancy_disk1_->GetXaxis()->SetTitle("Encoded Channel (boardID * 100 + chanID)");
@@ -199,15 +260,27 @@ namespace mu2e {
     h_global_board_dist_ = globalDir_->make<TH1F>("h_board_dist", "Global Board Distribution", 160, 0, 160);
     h_global_board_dist_->GetXaxis()->SetTitle("Board ID");
     h_global_board_dist_->GetYaxis()->SetTitle("Frequency");
+
+    if (enableDiskMaps_) {
+      h_disk0_map_ = globalDir_->makeAndRegister<mu2e::THMu2eCaloDisk>("h_disk0", "Calo Disk 0", "h_disk0", "Calo Disk 0", 0);
+      h_disk1_map_ = globalDir_->makeAndRegister<mu2e::THMu2eCaloDisk>("h_disk1", "Calo Disk 1", "h_disk1", "Calo Disk 1", 1);
+    }
+
+    setDiskMapTitles(h_disk0_map_, 0, mode_);
+    setDiskMapTitles(h_disk1_map_, 1, mode_);
   }
 
 
 
   void CaloDQMOffline::analyze(art::Event const& event) {
+    maxValueBySiPM.clear();
+    crystalIdBySiPM.clear();
+
     __COUT__ << "CaloDQMOffline is running inside OTSDAQ!" << std::endl;
-    art::ServiceHandle<art::TFileService> tfs;
     const auto& caloDigis = *event.getValidHandle(consumes<CaloDigiCollection>(caloDigiModuleLabel_));
     const auto& calodaqconds = _calodaqconds_h.get(event.id());
+
+
 
     for (const auto& digi : caloDigis) {
       const auto& waveform = digi.waveform();
@@ -223,13 +296,39 @@ namespace mu2e {
       crystalIdBySiPM[sipmId] = crystalId;
       maxValueBySiPM[sipmId] = waveform[digi.peakpos()];
 
-      int partnerSiPM = (sipmId % 2 == 0) ? sipmId + 1 : sipmId - 1;
-      if (maxValueBySiPM.count(partnerSiPM) && crystalIdBySiPM[sipmId] == crystalIdBySiPM[partnerSiPM]) {
-	float L = (sipmId % 2 == 0) ? maxValueBySiPM[sipmId] : maxValueBySiPM[partnerSiPM];
-	float R = (sipmId % 2 == 1) ? maxValueBySiPM[sipmId] : maxValueBySiPM[partnerSiPM];
-	float asym = (L + R > 0) ? (L - R) / (L + R) : 0.0;
-	h_asymmetry->Fill(asym);
+      const int partnerSiPM = (sipmId % 2 == 0) ? sipmId + 1 : sipmId - 1;
+
+      double L = 0.0, R = 0.0;
+      bool haveLR = false;
+
+      auto itP = maxValueBySiPM.find(partnerSiPM);
+      auto itC = crystalIdBySiPM.find(partnerSiPM);
+      if (itP != maxValueBySiPM.end() &&
+          itC != crystalIdBySiPM.end() &&
+          crystalIdBySiPM[sipmId] == itC->second) {
+        if (sipmId % 2 == 0) {
+          L = maxValueBySiPM[sipmId];
+          R = itP->second;
+        } else {
+          L = itP->second;
+          R = maxValueBySiPM[sipmId];
+        }
+        haveLR = true;
       }
+
+      if (haveLR) {
+        const double denom = L + R;
+        const double asym  = (denom > 0.0) ? (L - R) / denom : 0.0;
+        h_asymmetry->Fill(asym);
+      }
+
+      //      int partnerSiPM = (sipmId % 2 == 0) ? sipmId + 1 : sipmId - 1;
+      //  if (maxValueBySiPM.count(partnerSiPM) && crystalIdBySiPM[sipmId] == crystalIdBySiPM[partnerSiPM]) {
+      //	float L = (sipmId % 2 == 0) ? maxValueBySiPM[sipmId] : maxValueBySiPM[partnerSiPM];
+      //	float R = (sipmId % 2 == 1) ? maxValueBySiPM[sipmId] : maxValueBySiPM[partnerSiPM];
+      //	float asym = (L + R > 0) ? (L - R) / (L + R) : 0.0;
+      //	h_asymmetry->Fill(asym);
+      //}
 
       int rawId = calodaqconds.rawId(mu2e::CaloSiPMId(sipmId)).id();
       if (rawId == 9999) continue;
@@ -240,14 +339,31 @@ namespace mu2e {
 
       int encoded = boardID * 100 + chanID;
 
+
+      double val = 0.0;
+      switch (mode_) {
+      case MapMode::Amp:  val = waveform[digi.peakpos()]; break;
+      case MapMode::Sum:  val = haveLR ? (L + R) : waveform[digi.peakpos()]; break;
+      case MapMode::Asym: val = (haveLR && (L + R) > 0.0) ? (L - R) / (L + R) : 0.0; break;
+      }
+
+      if (enableDiskMaps_) {
+        if (disk == 0 && h_disk0_map_)      h_disk0_map_->FillOffline(sipmId, val);
+        else if (disk == 1 && h_disk1_map_) h_disk1_map_->FillOffline(sipmId, val);
+      }
+
+      if      (disk == 0) ++nFillDisk0_;
+      else if (disk == 1) ++nFillDisk1_;
+      else                ++nFillMiss_;
       h_global_board_dist_->Fill(boardID);
       h_global_channel_dist_->Fill(chanID);
 
       (disk == 0 ? h_occupancy_disk0_ : h_occupancy_disk1_)->Fill(encoded);
-      (disk == 0 ? h_baseline_disk0_ : h_baseline_disk1_)->Fill(encoded, baseline);
-      (disk == 0 ? h_rms_disk0_ : h_rms_disk1_)->Fill(encoded, rms);
-      (disk == 0 ? h_maxval_disk0_ : h_maxval_disk1_)->Fill(encoded, waveform[digi.peakpos()]);
+      (disk == 0 ? h_baseline_disk0_  : h_baseline_disk1_)->Fill(encoded, baseline);
+      (disk == 0 ? h_rms_disk0_       : h_rms_disk1_     )->Fill(encoded, rms);
+      (disk == 0 ? h_maxval_disk0_    : h_maxval_disk1_  )->Fill(encoded, waveform[digi.peakpos()]);
       h_baseline_vs_disk->Fill(disk == 0 ? 0.5 : 1.5, baseline);
+
 
       if (enableBoardHistos_ && (maxBoardHistos_ < 0 || (int)boardHistos_.size() < maxBoardHistos_)) {
 	std::pair<int, int> boardKey = std::make_pair(disk, boardID);
@@ -258,8 +374,9 @@ namespace mu2e {
 	}
 	art::TFileDirectory& histosDir = *cachedHistosDirs_[boardKey];
 
-	
-	
+	if (enableDiskMaps_ && h_disk0_map_) {
+          std::cout << "Disk0 bins: " << h_disk0_map_->GetNumberOfBins() << std::endl;
+        }
 
 	auto& histos = boardHistos_[boardKey];
 	if (histos.empty()) {
@@ -342,6 +459,11 @@ namespace mu2e {
       h_global_channel_dist_, h_global_board_dist_,
       h_global_board_vs_channel_, h_global_waveform_density_, h_baseline_vs_disk
     };
+    if (enableDiskMaps_) {
+      hists_to_send[moduleTag_ + std::string("/DiskMaps:replace")].push_back(h_disk0_map_);
+      hists_to_send[moduleTag_ + std::string("/DiskMaps:replace")].push_back(h_disk1_map_);
+    }
+
 
 
     for (auto& [key, hist] : channelWaveformHistos_) {
@@ -366,21 +488,19 @@ namespace mu2e {
 	hists_to_send[groupPath].push_back(h);
     }
 
-
-    histSender_->sendHistograms(hists_to_send);
-    std::cout << "Sending " << hists_to_send.size() << " histogram groups" << std::endl;
-    for (const auto& [dir, vec] : hists_to_send)
-      std::cout << "Group: " << dir << " - " << vec.size() << " hists" << std::endl;
-
+    if (sendHists_ && histSender_) {
+      histSender_->sendHistograms(hists_to_send);
+      std::cout << "Sending " << hists_to_send.size() << " histogram groups" << std::endl;
+      for (const auto& [dir, vec] : hists_to_send)
+        std::cout << "Group: " << dir << " - " << vec.size() << " hists" << std::endl;
+    }
 
 
 
   }
 
-void mu2e::CaloDQMOffline::endJob() {
-    
-}
-  
+  void mu2e::CaloDQMOffline::endJob() {
+  }
 }  // namespace mu2e
 
 DEFINE_ART_MODULE(mu2e::CaloDQMOffline);
