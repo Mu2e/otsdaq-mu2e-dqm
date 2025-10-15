@@ -322,14 +322,6 @@ namespace mu2e {
         h_asymmetry->Fill(asym);
       }
 
-      //      int partnerSiPM = (sipmId % 2 == 0) ? sipmId + 1 : sipmId - 1;
-      //  if (maxValueBySiPM.count(partnerSiPM) && crystalIdBySiPM[sipmId] == crystalIdBySiPM[partnerSiPM]) {
-      //	float L = (sipmId % 2 == 0) ? maxValueBySiPM[sipmId] : maxValueBySiPM[partnerSiPM];
-      //	float R = (sipmId % 2 == 1) ? maxValueBySiPM[sipmId] : maxValueBySiPM[partnerSiPM];
-      //	float asym = (L + R > 0) ? (L - R) / (L + R) : 0.0;
-      //	h_asymmetry->Fill(asym);
-      //}
-
       int rawId = calodaqconds.rawId(mu2e::CaloSiPMId(sipmId)).id();
       if (rawId == 9999) continue;
 
