@@ -66,7 +66,7 @@ namespace mu2e {
 
       fhicl::Atom<bool>        enableDiskMaps      { fhicl::Name("enableDiskMaps"), true };
 
-      // diskCombines controls which disk maps are produced (e.g. ["amp","baseline","rms","asym","sum"])
+      // diskCombines controls which disk maps are produced (["amp","baseline","rms","asym","sum"])
       fhicl::Sequence<std::string> diskCombines {
         fhicl::Name("diskCombines"),
         std::vector<std::string>{"asym"}
@@ -745,7 +745,6 @@ namespace mu2e {
   // endJob()
   // ===========================
   void CaloDQMOffline::endJob() {
-      if (histSender_) { delete histSender_; histSender_ = nullptr; }
   }
 
 } // namespace mu2e
