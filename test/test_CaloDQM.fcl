@@ -56,8 +56,7 @@ physics: {
       sendHists: false
       enableDiskMaps: true
       diskCombines: ["amp","sum","asym","baseline","rms"]
-      diskFormula: ""
-      
+      diskFormula: "" 
     }
   }
 
@@ -69,4 +68,3 @@ physics: {
 }
 
 services.scheduler.wantSummary: true
-
