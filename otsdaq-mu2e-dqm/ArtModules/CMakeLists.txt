@@ -26,7 +26,6 @@ cet_build_plugin(CaloDQMOffline art::module LIBRARIES REG
   ROOT::RIO
   ROOT::Gui
   ROOT::Graf
-  BTrk_ProbTools
   otsdaq::NetworkUtilities
 )
 
@@ -72,11 +71,9 @@ ROOT::RIO
 ROOT::Gui
 )
 
-# BTrk and KinKal have non-standard Find*.cmake...
+# KinKal has non-standard Find*.cmake...
 include_directories($ENV{KINKAL_INC})
-include_directories($ENV{BTRK_INC})
 link_directories($ENV{KINKAL_LIB})
-link_directories($ENV{BTRK_LIB})
 
 cet_build_plugin(TriggerDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
