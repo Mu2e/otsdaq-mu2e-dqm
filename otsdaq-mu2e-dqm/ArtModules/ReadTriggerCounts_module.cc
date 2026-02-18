@@ -247,10 +247,10 @@ void ReadTriggerCounts::analyze(const art::Event& event)
 	                      2,
 	                      artdaq::MetricMode::LastPoint);
 	for(unsigned int i = 0; i < trigNavig.getTrigPaths().size(); ++i)
-	{		
+	{
 		//Note: Trig Path = bit | name
-		std::string name =
-		    trigNavig.getTrigPathNameByIndex(i);  // incorporates the reconstruction algorithm
+		std::string name = trigNavig.getTrigPathNameByIndex(
+		    i);  // incorporates the reconstruction algorithm
 		if(trigNavig.accepted(name))
 		{
 			triggerStreamCounts["TriggerCounts." + name]++;
