@@ -160,10 +160,11 @@ void ots::TriggerDQM::summary_trigger_fill(TriggerDQMHistoContainer*      histos
 		// Used to get the number of triggered events from each trigger path
 		for(unsigned int i = 0; i < trigNavig.getTrigPaths().size(); ++i)
 		{
-			std::string path   = trigNavig.getTrigPathName(i);
-			size_t      pathID = trigNavig.findTrigPathID(path);
-			if(trigNavig.accepted(path))
-				histos->histograms[0]._Hist->Fill(pathID);
+			//Note: Trig Path = bit | name
+			std::string name   = trigNavig.getTrigPathNameByIndex(i);
+			size_t      bit = trigNavig.getTrigBitByName(name);
+			if(trigNavig.accepted(name))
+				histos->histograms[0]._Hist->Fill(bit);
 		}
 
 		histos->histograms[1]._Hist->Fill(0);
