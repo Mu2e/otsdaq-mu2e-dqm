@@ -161,8 +161,8 @@ void ots::TriggerDQM::summary_trigger_fill(TriggerDQMHistoContainer*      histos
 		for(unsigned int i = 0; i < trigNavig.getTrigPaths().size(); ++i)
 		{
 			//Note: Trig Path = bit | name
-			std::string name   = trigNavig.getTrigPathNameByIndex(i);
-			size_t      bit = trigNavig.getTrigBitByName(name);
+			std::string name = trigNavig.getTrigPathNameByIndex(i);
+			size_t      bit  = trigNavig.getTrigBitByName(name);
 			if(trigNavig.accepted(name))
 				histos->histograms[0]._Hist->Fill(bit);
 		}
