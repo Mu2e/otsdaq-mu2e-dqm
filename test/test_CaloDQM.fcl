@@ -15,8 +15,6 @@ services: {
     simulatedDetector: { tool_type: "Mu2e" }
   }
 
-  ConditionsService: { conditionsfile: "Offline/ConditionsService/data/conditions_01.txt" }
-
   GlobalConstantsService: { inputFile: "Offline/GlobalConstantsService/data/globalConstants_01.txt" }
 
   DbService: @local::DbEmpty

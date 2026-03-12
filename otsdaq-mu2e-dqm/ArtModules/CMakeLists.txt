@@ -109,7 +109,6 @@ art_root_io::TFileService_service
 artdaq-core-mu2e::Data
 	artdaq::ArtModules
 Offline::BFieldGeom
-      Offline::ConditionsService
       Offline::DataProducts
       Offline::GeometryService
       Offline::GlobalConstantsService
