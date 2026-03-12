@@ -6,8 +6,7 @@
 #   )
 
 
-
-cet_build_plugin(CaloDQMOffline art::module LIBRARIES REG
+cet_build_plugin(CaloDigiDQM art::module LIBRARIES REG
   otsdaq-mu2e::ArtModules
   artdaq-core-mu2e::Data
   artdaq-core-mu2e::Data_dict
@@ -28,7 +27,6 @@ cet_build_plugin(CaloDQMOffline art::module LIBRARIES REG
   ROOT::Graf
   otsdaq::NetworkUtilities
 )
-
 
 cet_build_plugin(CaloDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
