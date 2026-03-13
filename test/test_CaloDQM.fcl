@@ -46,17 +46,16 @@ physics: {
       module_type: CaloDigiDQM
       caloDigiModuleLabel: "CaloDigisFromDTCEvents"
 
-      address: "127.0.0.1"
-      port: 8000
+      address: "mu2edaq11-data.fnal.gov"
+      port: 6000
       moduleTag: "SimpleDQM"
       freqDQM: 10
       freqWaveforms: 100
-      
       sendHists: false
-      enableDiskMaps: true
+      enableDiskMaps: false
       diskCombines: ["amp"]
 
-      useReferenceFile: true
+      useReferenceFile: false
       referenceFile: "reference.root"
     }
   }
