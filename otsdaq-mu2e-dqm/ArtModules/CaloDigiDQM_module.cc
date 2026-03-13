@@ -15,8 +15,8 @@
 //   - disk maps are always saved to ROOT
 //   - enableDiskMaps affects streaming only
 ////////////////////////////////////////////////////////////////////////////////////
-#include "Offline/ProditionsService/inc/ProditionsHandle.hh"
 #include "Offline/CaloConditions/inc/CaloDAQMap.hh"
+#include "Offline/ProditionsService/inc/ProditionsHandle.hh"
 
 #include "art/Framework/Core/EDAnalyzer.h"
 #include "art/Framework/Core/ModuleMacros.h"
@@ -91,8 +91,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 		fhicl::Atom<bool> enableDiskMaps{fhicl::Name("enableDiskMaps"), true};
 
 		// Disk map streaming selection only, examples {"asym"} or {"asym","sum"}
-          	// Disk maps are streamed less frequently than summary histograms
-          fhicl::Sequence<std::string> diskCombines{fhicl::Name("diskCombines"),
+		// Disk maps are streamed less frequently than summary histograms
+		fhicl::Sequence<std::string> diskCombines{fhicl::Name("diskCombines"),
 		                                          std::vector<std::string>{"asym"}};
 	};
 
@@ -104,13 +104,14 @@ class CaloDigiDQM : public art::EDAnalyzer
 	// -----------------------
 	// Fixed waveform settings
 	// -----------------------
-	static constexpr int kWaveformNBins       = 64;   // Number of bins used for live and first-hit waveform histograms.
+	static constexpr int kWaveformNBins =
+	    64;  // Number of bins used for live and first-hit waveform histograms.
 	static constexpr int kWaveformSizeHistMax = 200;  // Cap for size histogram axis
 
 	// -----------------------
 	// Disk-map streaming cadence
 	// -----------------------
-  	// Disk maps are streamed less frequently than summary histograms
+	// Disk maps are streamed less frequently than summary histograms
 	// This value is added on top of freqDQM to reduce refresh cost
 	static constexpr int kDiskMapsExtraPeriod = 100;
 
@@ -1476,9 +1477,9 @@ void CaloDigiDQM::analyze(art::Event const& event)
 	if(!doSummariesEvent && !doWaveforms && !doDiskMaps)
 		return;
 
-        // No sender means no streaming, keep ROOT output path independent
-        if(!sendHists_ || !histSender_)
-          return;
+	// No sender means no streaming, keep ROOT output path independent
+	if(!sendHists_ || !histSender_)
+		return;
 
 	// Materialize derived content only when it will be streamed
 	if(doDiskMaps)
@@ -1585,44 +1586,42 @@ void CaloDigiDQM::analyze(art::Event const& event)
 		}
 	}
 
-        // Streaming failures are rate limited by disabling sendHists_ after repeated errors
-        try
-          {
-            histSender_->sendHistograms(hists_to_send);
-            histSendErrorCount_ = 0;
-          }
-        catch(const std::exception& e)
-          {
-            ++histSendErrorCount_;
-            mf::LogError("CaloDigiDQM")
-              << "HistoSender::sendHistograms exception ("
-              << histSendErrorCount_ << "): " << e.what();
+	// Streaming failures are rate limited by disabling sendHists_ after repeated errors
+	try
+	{
+		histSender_->sendHistograms(hists_to_send);
+		histSendErrorCount_ = 0;
+	}
+	catch(const std::exception& e)
+	{
+		++histSendErrorCount_;
+		mf::LogError("CaloDigiDQM") << "HistoSender::sendHistograms exception ("
+		                            << histSendErrorCount_ << "): " << e.what();
 
-            if(histSendErrorCount_ >= kMaxSendErrors_)
-              {
-                sendHists_ = false;
-                histSender_.reset();
-                mf::LogWarning("CaloDigiDQM")
-                  << "Histogram streaming disabled after "
-                  << histSendErrorCount_ << " consecutive send errors.";
-              }
-          }
-        catch(...)
-          {
-            ++histSendErrorCount_;
-            mf::LogError("CaloDigiDQM")
-              << "HistoSender::sendHistograms non-std exception ("
-              << histSendErrorCount_ << ").";
+		if(histSendErrorCount_ >= kMaxSendErrors_)
+		{
+			sendHists_ = false;
+			histSender_.reset();
+			mf::LogWarning("CaloDigiDQM")
+			    << "Histogram streaming disabled after " << histSendErrorCount_
+			    << " consecutive send errors.";
+		}
+	}
+	catch(...)
+	{
+		++histSendErrorCount_;
+		mf::LogError("CaloDigiDQM") << "HistoSender::sendHistograms non-std exception ("
+		                            << histSendErrorCount_ << ").";
 
-            if(histSendErrorCount_ >= kMaxSendErrors_)
-              {
-                sendHists_ = false;
-                histSender_.reset();
-                mf::LogWarning("CaloDigiDQM")
-                  << "Histogram streaming disabled after "
-                  << histSendErrorCount_ << " consecutive send errors.";
-              }
-          }
+		if(histSendErrorCount_ >= kMaxSendErrors_)
+		{
+			sendHists_ = false;
+			histSender_.reset();
+			mf::LogWarning("CaloDigiDQM")
+			    << "Histogram streaming disabled after " << histSendErrorCount_
+			    << " consecutive send errors.";
+		}
+	}
 }
 
 // ===========================
@@ -1702,14 +1701,14 @@ void CaloDigiDQM::endJob()
 			const int   chan    = chanFromEncoded(enc);
 			const int   boardID = boardIdFromDiskAndLocal(disk, blocal);
 
-                        // Log one summary row per unstable channel:
-                        //   first    = first waveform size seen for this channel
-                        //   min/max  = minimum and maximum waveform sizes seen across the run
-                        //   seen     = number of digis observed for this channel
-                        //   trans    = number of times waveform size changed relative to previous digi
-                        //   mismatch = number of times waveform size differed from the first observed size
-                        //   pad      = number of waveforms shorter than kWaveformNBins
-                        //   trunc    = number of waveforms longer than kWaveformNBins
+			// Log one summary row per unstable channel:
+			//   first    = first waveform size seen for this channel
+			//   min/max  = minimum and maximum waveform sizes seen across the run
+			//   seen     = number of digis observed for this channel
+			//   trans    = number of times waveform size changed relative to previous digi
+			//   mismatch = number of times waveform size differed from the first observed size
+			//   pad      = number of waveforms shorter than kWaveformNBins
+			//   trunc    = number of waveforms longer than kWaveformNBins
 			os << "  (D" << disk << " B" << boardID << " C" << chan << ")"
 			   << " first=" << r.st.first << " min=" << r.st.min << " max=" << r.st.max
 			   << " seen=" << r.st.nSeen << " trans=" << r.st.nTransitions
