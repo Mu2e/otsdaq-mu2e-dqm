@@ -95,6 +95,10 @@ class CaloDigiDQM : public art::EDAnalyzer
 		// Disk maps are streamed less frequently than summary histograms
 		fhicl::Sequence<std::string> diskCombines{fhicl::Name("diskCombines"),
 		                                          std::vector<std::string>{"asym"}};
+		// Optional reference ROOT file for comparison histograms
+		fhicl::Atom<bool>        useReferenceFile{fhicl::Name("useReferenceFile"), false};
+		fhicl::Atom<std::string> referenceFile{fhicl::Name("referenceFile"),
+		                                       "reference.root"};
 	};
 
 	explicit CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config);
@@ -102,13 +106,6 @@ class CaloDigiDQM : public art::EDAnalyzer
 	void endJob() override;
 
   private:
-	// -----------------------
-	// Reference file
-	// -----------------------
-	// Reference histograms are optional (kUseReferenceFile)
-	// Missing file or missing objects should not stop the module
-	static constexpr bool        kUseReferenceFile = false;
-	static constexpr const char* kReferenceFile    = "reference.root";
 	// -----------------------
 	// Fixed waveform settings
 	// -----------------------
@@ -512,6 +509,14 @@ class CaloDigiDQM : public art::EDAnalyzer
 	// Streaming toggle for disk maps, saving is always enabled
 	bool enableDiskMaps_{true};
 
+	// -----------------------
+	// Reference file
+	// -----------------------
+	// Reference histograms are optional (kUseReferenceFile)
+	// Missing file or missing objects should not stop the module
+	bool        useReferenceFile_{false};
+	std::string referenceFile_{"reference.root"};
+
 	// Simple counters for coverage reporting
 	int nFillDisk0_{0}, nFillDisk1_{0}, nFillMiss_{0};
 
@@ -908,18 +913,21 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
     , moduleTag_(config().moduleTag())
     , sendHists_(config().sendHists())
     , enableDiskMaps_(config().enableDiskMaps())
+    , useReferenceFile_(config().useReferenceFile())
+    , referenceFile_(config().referenceFile())
+
 {
 	// -----------------------
 	// Reference file
 	// -----------------------
-	if(kUseReferenceFile)
+	if(useReferenceFile_)
 	{
-		TFile f(kReferenceFile, "READ");
+		TFile f(referenceFile_.c_str(), "READ");
 		if(f.IsZombie())
 		{
 			mf::LogWarning("CaloDigiDQM")
 			    << "Reference file not available, continuing without references: "
-			    << kReferenceFile;
+			    << referenceFile_;
 		}
 		else
 		{
