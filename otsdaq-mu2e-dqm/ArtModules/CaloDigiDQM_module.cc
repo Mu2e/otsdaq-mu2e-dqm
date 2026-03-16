@@ -61,6 +61,7 @@
 #include <string>
 #include <utility>
 #include <vector>
+#include "cetlib_except/exception.h"
 
 namespace mu2e
 {
@@ -70,35 +71,31 @@ class CaloDigiDQM : public art::EDAnalyzer
 	struct Config
 	{
 		// otsdaq destination and top-level namespace for streamed histograms
-		fhicl::Atom<std::string> address{fhicl::Name("address"),
-		                                 "mu2edaq11-data.fnal.gov"};
-		fhicl::Atom<int>         port{fhicl::Name("port"), 6000};
-		fhicl::Atom<std::string> moduleTag{fhicl::Name("moduleTag"), "CaloDQM"};
-		fhicl::Atom<bool>        sendHists{fhicl::Name("sendHists"), false};
+		fhicl::Atom<std::string> address{fhicl::Name("address")};
+		fhicl::Atom<int>         port{fhicl::Name("port")};
+		fhicl::Atom<std::string> moduleTag{fhicl::Name("moduleTag")};
+		fhicl::Atom<bool>        sendHists{fhicl::Name("sendHists")};
 
 		// Event cadence for streaming
 		// freqDQM controls summary histograms
 		// freqWaveforms controls live waveform streaming
-		fhicl::Atom<int> freqDQM{fhicl::Name("freqDQM"), 100};
-		fhicl::Atom<int> freqWaveforms{fhicl::Name("freqWaveforms"),
-		                               0};  // 0 = disable waveform streaming
+		fhicl::Atom<int> freqDQM{fhicl::Name("freqDQM")};
+		fhicl::Atom<int> freqWaveforms{
+		    fhicl::Name("freqWaveforms")};  // 0 = disable waveform streaming
 
 		// art input tag label for the CaloDigiCollection
-		fhicl::Atom<std::string> caloDigiModuleLabel{fhicl::Name("caloDigiModuleLabel"),
-		                                             "CaloDigi"};
+		fhicl::Atom<std::string> caloDigiModuleLabel{fhicl::Name("caloDigiModuleLabel")};
 
 		// Disk maps are always saved to the ROOT file
 		// This flag controls disk-map streaming only
-		fhicl::Atom<bool> enableDiskMaps{fhicl::Name("enableDiskMaps"), true};
+		fhicl::Atom<bool> enableDiskMaps{fhicl::Name("enableDiskMaps")};
 
 		// Disk map streaming selection only, examples {"asym"} or {"asym","sum"}
 		// Disk maps are streamed less frequently than summary histograms
-		fhicl::Sequence<std::string> diskCombines{fhicl::Name("diskCombines"),
-		                                          std::vector<std::string>{"asym"}};
+		fhicl::Sequence<std::string> diskCombines{fhicl::Name("diskCombines")};
 		// Optional reference ROOT file for comparison histograms
-		fhicl::Atom<bool>        useReferenceFile{fhicl::Name("useReferenceFile"), false};
-		fhicl::Atom<std::string> referenceFile{fhicl::Name("referenceFile"),
-		                                       "reference.root"};
+		fhicl::Atom<bool>        useReferenceFile{fhicl::Name("useReferenceFile")};
+		fhicl::Atom<std::string> referenceFile{fhicl::Name("referenceFile")};
 	};
 
 	explicit CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config);
@@ -146,7 +143,12 @@ class CaloDigiDQM : public art::EDAnalyzer
 			return MapMode::Baseline;
 		if(s == "rms")
 			return MapMode::RMS;
-		return MapMode::Amp;
+		if(s == "amp")
+			return MapMode::Amp;
+
+		throw cet::exception("BADCONFIG")
+		    << "CaloDigiDQM: unknown diskCombines entry '" << s
+		    << "'. Allowed values are: amp, sum, asym, baseline, rms.";
 	}
 
 	// Short suffix used for object names and streaming groups
@@ -180,26 +182,26 @@ class CaloDigiDQM : public art::EDAnalyzer
 		switch(mode)
 		{
 		case MapMode::Amp:
-			main   = "SiPM amplitude (peak - baseline)";
-			ztitle = "Amplitude [ADC]";
+			main   = "Mean SiPM amplitude (peak - baseline)";
+			ztitle = "Mean Amplitude [ADC]";
 			break;
 		case MapMode::Sum:
-			main   = "Crystal sum (L+R) amplitude";
-			ztitle = "L+R [ADC]";
+			main   = "Mean Crystal sum (L+R) amplitude";
+			ztitle = "Mean L+R [ADC]";
 			break;
 		case MapMode::Asym:
-			main   = "Asymmetry (L-R)/(L+R)";
-			ztitle = "Asymmetry";
+			main   = "Mean Crystal Asymmetry (L-R)/(L+R)";
+			ztitle = "Mean Asymmetry";
 			h->SetMinimum(-1.0);
 			h->SetMaximum(1.0);
 			break;
 		case MapMode::Baseline:
-			main   = "SiPM baseline";
-			ztitle = "Baseline [ADC]";
+			main   = "Mean SiPM baseline";
+			ztitle = "Mean Baseline [ADC]";
 			break;
 		case MapMode::RMS:
-			main   = "SiPM baseline RMS";
-			ztitle = "RMS [ADC]";
+			main   = "Mean SiPM baseline RMS";
+			ztitle = "Mean RMS [ADC]";
 			break;
 		}
 
@@ -493,12 +495,12 @@ class CaloDigiDQM : public art::EDAnalyzer
 	art::InputTag caloDigiTag_;
 	std::string   caloDigiModuleLabel_;
 
-	int         freqDQM_{100};
-	int         freqWaveforms_{0};
+	int         freqDQM_;
+	int         freqWaveforms_;
 	std::string address_;
-	int         port_{6000};
+	int         port_;
 	std::string moduleTag_;
-	bool        sendHists_{false};
+	bool        sendHists_;
 
 	std::unique_ptr<ots::HistoSender> histSender_;
 	int                               eventCounter_{0};
@@ -507,15 +509,15 @@ class CaloDigiDQM : public art::EDAnalyzer
 	static constexpr int              kMaxSendErrors_ = 10;
 
 	// Streaming toggle for disk maps, saving is always enabled
-	bool enableDiskMaps_{true};
+	bool enableDiskMaps_;
 
 	// -----------------------
 	// Reference file
 	// -----------------------
 	// Reference histograms are optional (kUseReferenceFile)
 	// Missing file or missing objects should not stop the module
-	bool        useReferenceFile_{false};
-	std::string referenceFile_{"reference.root"};
+	bool        useReferenceFile_;
+	std::string referenceFile_;
 
 	// Simple counters for coverage reporting
 	int nFillDisk0_{0}, nFillDisk1_{0}, nFillMiss_{0};
@@ -1012,8 +1014,6 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	// Stream selection controls otsdaq streaming only
 	// -----------------------
 	std::vector<std::string> rawStream = config().diskCombines();
-	if(rawStream.empty())
-		rawStream = {"asym"};
 
 	streamEnabledModes_.fill(false);
 	enabledModes_.fill(false);

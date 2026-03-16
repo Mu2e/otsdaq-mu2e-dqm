@@ -26,7 +26,7 @@ services: {
   TimeTracker: {}
 
   TFileService: {
-    fileName: "calo_test_fin1.root"
+    fileName: "calo_test_fin2.root"
   //  closeFileFast: false
   }
 }
