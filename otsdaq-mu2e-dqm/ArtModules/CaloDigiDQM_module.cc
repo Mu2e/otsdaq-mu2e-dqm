@@ -6,7 +6,7 @@
 // Responsibilities:
 //   - read CaloDigi objects
 //   - map offline SiPM IDs to electronics IDs via CaloDAQMap
-//   - fill ROOT histograms for global, disk, board, and channel-level monitoring
+//   - fill ROOT histograms for global, disk, board, channel, and laser monitoring
 //   - optionally stream selected histograms to otsdaq via HistoSender
 //
 // Maintainer notes:
@@ -14,6 +14,11 @@
 //   - channelIndex(...) returns a compact global channel index
 //   - disk maps are always saved to ROOT
 //   - enableDiskMaps affects streaming only
+//   - board 160 is treated as the dedicated laser board and is handled separately
+//     from regular disk/board/channel monitoring
+//   - reference histograms are optional; missing reference files or objects do not
+//     stop the module
+//   - live waveform streaming is update-driven to reduce network load
 ////////////////////////////////////////////////////////////////////////////////////
 #include "Offline/CaloConditions/inc/CaloDAQMap.hh"
 #include "Offline/ProditionsService/inc/ProditionsHandle.hh"
@@ -56,10 +61,8 @@
 #include <limits>
 #include <map>
 #include <memory>
-#include <numeric>
 #include <sstream>
 #include <string>
-#include <utility>
 #include <vector>
 #include "cetlib_except/exception.h"
 
@@ -129,7 +132,6 @@ class CaloDigiDQM : public art::EDAnalyzer
 		RMS
 	};
 
-	// Parse a user string into a map mode, default is Amp for unknown values
 	static MapMode parseMode(std::string s)
 	{
 		std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) {
@@ -232,7 +234,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 		return (boardID - bmin) * kChannelsPerBoard + chanID;
 	}
 
-	static int encodeSparse(int boardID, int chanID) { return boardID * 80 + chanID; }
+	static int encodeSparse(int boardID, int chanID) { return boardID * 100 + chanID; }
 
 	static int encodeDense(int boardID, int chanID)
 	{
@@ -248,7 +250,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 	static EncodedAxisConfig axisSparseGlobal()
 	{
-		return EncodedAxisConfig{12740, 0.0, 12740.0};
+		return EncodedAxisConfig{15920, 0.0, 15920.0};
 	}
 
 	static EncodedAxisConfig axisDenseGlobal()
@@ -288,8 +290,6 @@ class CaloDigiDQM : public art::EDAnalyzer
 		BadSipmId = 0,
 		UnmappedRawId,
 		RawIdNegative,
-		BoardOutOfRange,
-		ChanOutOfRange,
 		DiskOutOfRange,
 		PeakPosOutOfRange,
 		NonFiniteBaselineOrRms,
@@ -321,10 +321,6 @@ class CaloDigiDQM : public art::EDAnalyzer
 			return "UnmappedRawId";
 		case SkipReason::RawIdNegative:
 			return "RawIdNegative";
-		case SkipReason::BoardOutOfRange:
-			return "BoardOutOfRange";
-		case SkipReason::ChanOutOfRange:
-			return "ChanOutOfRange";
 		case SkipReason::DiskOutOfRange:
 			return "DiskOutOfRange";
 		case SkipReason::PeakPosOutOfRange:
@@ -419,39 +415,29 @@ class CaloDigiDQM : public art::EDAnalyzer
 	// -----------------------
 	struct SipmFeat
 	{
-		double amp{0.0};
-		double baseline{0.0};
-		double rms{0.0};
-		double ampRaw{0.0};
-		int    disk{-1};
-		int    board{-1};
-		int    chan{-1};
-		int    cidx{-1};
+		double                            amp{0.0};
+		double                            baseline{0.0};
+		double                            rms{0.0};
+		double                            ampRaw{0.0};
+		int                               disk{-1};
+		int                               board{-1};
+		int                               chan{-1};
+		int                               cidx{-1};
+		std::array<float, kWaveformNBins> wfSub{};
 	};
 	// Stamp based validity avoids per event clearing of large vectors
 	int                   pairStamp_{0};
 	std::vector<SipmFeat> feat_;       // Indexed by sipmId
 	std::vector<int>      featStamp_;  // featStamp[sipmId] equals pairStamp when valid
 	std::vector<int> pairedStamp_;  // pairedStamp[crystalId] equals pairStamp when paired
+	std::vector<uint16_t>
+	    sipmMultiplicity_;  // number of usable digis per sipmId in this event
 
 	// -----------------------
 	// Waveform caching
 	// -----------------------
 	std::vector<std::array<float, kWaveformNBins>> lastWf_;
-	std::vector<uint16_t>                          lastWfSize_;
 	std::vector<uint8_t>                           lastWfValid_;
-
-	// Cache up to kWaveformNBins samples for streaming without rewalking the digi collection
-	inline void cacheWaveform(int cidx, auto const& waveform, float baseline)
-	{
-		const int n = std::min<int>((int)waveform.size(), kWaveformNBins);
-		for(int i = 0; i < n; ++i)
-			lastWf_[(size_t)cidx][(size_t)i] = (float)waveform[(size_t)i] - baseline;
-		for(int i = n; i < kWaveformNBins; ++i)
-			lastWf_[(size_t)cidx][(size_t)i] = 0.0f;
-		lastWfSize_[(size_t)cidx]  = (uint16_t)waveform.size();
-		lastWfValid_[(size_t)cidx] = 1u;
-	}
 
 	// Copy cached samples into a live waveform histogram just before streaming
 	inline void flushCachedWaveformToHist(TH1F* h, int cidx) const
@@ -467,11 +453,55 @@ class CaloDigiDQM : public art::EDAnalyzer
 	// Flush all booked live waveform hists from the cached arrays
 	void flushAllLiveWaveforms()
 	{
-		for(int cidx = 0; cidx < kTotalChannels; ++cidx)
+		for(int cidx : activeRegularChannels_)
 		{
 			if(liveWf_[(size_t)cidx])
 				flushCachedWaveformToHist(liveWf_[(size_t)cidx], cidx);
 		}
+	}
+
+	void flushUpdatedLiveWaveforms()
+	{
+		for(int cidx : updatedRegularChannels_)
+		{
+			if(liveWaveformUpdated_[(size_t)cidx] && liveWf_[(size_t)cidx])
+				flushCachedWaveformToHist(liveWf_[(size_t)cidx], cidx);
+		}
+	}
+
+	void flushUpdatedLaserLiveWaveforms()
+	{
+		for(int chan : updatedLaserChannels_)
+		{
+			if(laserLiveWaveformUpdated_[(size_t)chan] && laserLiveWf_[(size_t)chan])
+				flushLaserCachedWaveformToHist(laserLiveWf_[(size_t)chan], chan);
+		}
+	}
+
+	inline void updateWaveformStats(WaveformSizeStats& st, int wfSize)
+	{
+		const uint32_t sz = (uint32_t)wfSize;
+
+		if(st.nSeen == 0)
+			st.first = st.last = st.min = st.max = sz;
+		else
+		{
+			if(sz != st.first)
+				st.nMismatchToFirst++;
+			if(sz != st.last)
+				st.nTransitions++;
+			if(sz < st.min)
+				st.min = sz;
+			if(sz > st.max)
+				st.max = sz;
+			st.last = sz;
+		}
+
+		st.nSeen++;
+		if(sz > (uint32_t)kWaveformNBins)
+			st.nTruncated++;
+		else if(sz < (uint32_t)kWaveformNBins)
+			st.nPadded++;
 	}
 
 	// -----------------------
@@ -493,7 +523,6 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::vector<MapMode> streamModes_;
 
 	art::InputTag caloDigiTag_;
-	std::string   caloDigiModuleLabel_;
 
 	int         freqDQM_;
 	int         freqWaveforms_;
@@ -504,7 +533,6 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 	std::unique_ptr<ots::HistoSender> histSender_;
 	int                               eventCounter_{0};
-	int                               waveformCounter_{0};
 	int                               histSendErrorCount_{0};
 	static constexpr int              kMaxSendErrors_ = 10;
 
@@ -514,16 +542,16 @@ class CaloDigiDQM : public art::EDAnalyzer
 	// -----------------------
 	// Reference file
 	// -----------------------
-	// Reference histograms are optional (kUseReferenceFile)
+	// Reference histograms are optional
 	// Missing file or missing objects should not stop the module
 	bool        useReferenceFile_;
 	std::string referenceFile_;
 
 	// Simple counters for coverage reporting
-	int nFillDisk0_{0}, nFillDisk1_{0}, nFillMiss_{0};
+	int nFillDisk0_{0}, nFillDisk1_{0}, nFillLaser_{0}, nFillMiss_{0};
 
 	// -----------------------
-	// Reference file
+	// Reference histograms
 	// -----------------------
 	TH1F*     ref_h_occ_dense_{nullptr};
 	TProfile* ref_h_base_dense_{nullptr};
@@ -548,6 +576,73 @@ class CaloDigiDQM : public art::EDAnalyzer
 		TProfile* max{nullptr};
 	};
 
+	static constexpr int kLaserBoardID  = 160;
+	static constexpr int kLaserChannels = kChannelsPerBoard;
+
+	static bool isLaserBoard(int boardID) { return boardID == kLaserBoardID; }
+
+	void ensureLaserBoardBooked();
+	void ensureLaserBaselineDistBooked(int chanID);
+	void ensureLaserRmsDistBooked(int chanID);
+	void ensureLaserMaxDistBooked(int chanID);
+	void ensureLaserLiveWaveformBooked(int chanID, int rawId, int sipmId);
+	void ensureLaserFirstHitBooked(int         chanID,
+	                               int         rawId,
+	                               int         sipmId,
+	                               auto const& waveform,
+	                               int         wfSize,
+	                               float       baseline);
+
+	static bool computeBaselineRms(auto const& waveform,
+	                               int         wfSize,
+	                               float&      baseline,
+	                               float&      rms)
+	{
+		if(wfSize <= 0)
+			return false;
+
+		const int nBase = std::min<int>(5, wfSize);
+
+		float sum   = 0.0f;
+		float sumsq = 0.0f;
+
+		for(int i = 0; i < nBase; ++i)
+		{
+			const float x = waveform[(size_t)i];
+			sum += x;
+			sumsq += x * x;
+		}
+
+		baseline            = sum / (float)nBase;
+		const float mean_sq = sumsq / (float)nBase;
+		rms = (mean_sq > baseline * baseline) ? std::sqrt(mean_sq - baseline * baseline)
+		                                      : 0.0f;
+
+		return std::isfinite(baseline) && std::isfinite(rms);
+	}
+
+	inline void flushLaserCachedWaveformToHist(TH1F* h, int chanID) const
+	{
+		if(!h)
+			return;
+		if(chanID < 0 || chanID >= kLaserChannels)
+			return;
+		if(!laserLastWfValid_[(size_t)chanID])
+			return;
+
+		for(int i = 0; i < kWaveformNBins; ++i)
+			h->SetBinContent(i + 1, (double)laserLastWf_[(size_t)chanID][(size_t)i]);
+	}
+
+	void flushAllLaserLiveWaveforms()
+	{
+		for(int chan : activeLaserChannels_)
+		{
+			if(laserLiveWf_[(size_t)chan])
+				flushLaserCachedWaveformToHist(laserLiveWf_[(size_t)chan], chan);
+		}
+	}
+
 	std::array<BoardHists, kTotalBoards>                           boardH_{};
 	std::array<std::unique_ptr<art::TFileDirectory>, kTotalBoards> boardHistDir_{};
 	std::array<std::unique_ptr<art::TFileDirectory>, kTotalBoards> boardChanDir_{};
@@ -555,6 +650,30 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::array<std::unique_ptr<art::TFileDirectory>, kTotalBoards> boardRmsDir_{};
 	std::array<std::unique_ptr<art::TFileDirectory>, kTotalBoards> boardMaxDir_{};
 	std::array<std::unique_ptr<art::TFileDirectory>, kTotalBoards> boardAsymDir_{};
+	std::unique_ptr<art::TFileDirectory>                           laserDir_;
+	std::unique_ptr<art::TFileDirectory>                           laserBoardHistDir_;
+	std::unique_ptr<art::TFileDirectory>                           laserBoardChanDir_;
+	std::unique_ptr<art::TFileDirectory>                           laserBaselineDir_;
+	std::unique_ptr<art::TFileDirectory>                           laserRmsDir_;
+	std::unique_ptr<art::TFileDirectory>                           laserMaxDir_;
+
+	BoardHists laserBoardH_{};
+
+	std::array<TH1F*, kLaserChannels>   laserLiveWf_{};
+	std::array<TH1F*, kLaserChannels>   laserOneHitWf_{};
+	std::array<uint8_t, kLaserChannels> laserOneHitSeen_{};
+	std::array<uint8_t, kLaserChannels> laserOneHitSent_{};
+	std::array<uint8_t, kLaserChannels> laserLiveWaveformUpdated_{};
+	std::array<uint8_t, kLaserChannels> laserChannelBooked_{};
+
+	std::array<WaveformSizeStats, kLaserChannels> laserWfStats_{};
+
+	std::array<TH1F*, kLaserChannels> laserBaselineDist_{};
+	std::array<TH1F*, kLaserChannels> laserRmsDist_{};
+	std::array<TH1F*, kLaserChannels> laserMaxDist_{};
+
+	std::array<std::array<float, kWaveformNBins>, kLaserChannels> laserLastWf_{};
+	std::array<uint8_t, kLaserChannels>                           laserLastWfValid_{};
 
 	// -----------------------
 	// Per-channel waveforms
@@ -562,7 +681,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::vector<TH1F*>             liveWf_;
 	std::vector<TH1F*>             oneHitWf_;
 	std::vector<uint8_t>           oneHitSeen_;
-	std::vector<uint8_t>           chSeen_;
+	std::vector<uint8_t>           oneHitSent_;
+	std::vector<uint8_t>           liveWaveformUpdated_;
 	std::vector<WaveformSizeStats> wfStats_;
 	std::vector<TH1F*>             h_baseline_dist_;
 	std::vector<TH1F*>             h_rms_dist_;
@@ -570,6 +690,25 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::vector<TH1F*>             h_asym_dist_;
 
 	std::vector<uint8_t> channelBooked_;
+
+	// Streaming bookkeeping
+	//   active*           : objects that exist / were seen at least once
+	//   updated*          : objects modified since the last successful send
+	//   *QueuedForSend_   : de-duplication flags for updated* vectors
+	std::vector<int> activeRegularChannels_;
+	std::vector<int> activeLaserChannels_;
+	std::vector<int> updatedBoards_;
+	std::vector<int> updatedRegularChannels_;
+	std::vector<int> updatedLaserChannels_;
+
+	size_t pendingRegularFirstHits_{0};
+	size_t pendingLaserFirstHits_{0};
+
+	std::vector<uint8_t>                boardQueuedForSend_;
+	std::vector<uint8_t>                regularQueuedForSend_;
+	std::array<uint8_t, kLaserChannels> laserQueuedForSend_{};
+
+	bool laserBoardUpdated_{false};
 
 	// TFileService folders
 	std::unique_ptr<art::TFileDirectory> disk0Dir_;
@@ -599,6 +738,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 	TProfile* h_amp_dense_{nullptr};
 	TH1F*     h_occupancy_sparse_{nullptr};
 	TH1F*     h_occupancy_dense_{nullptr};
+	TH1I*     h_pair_multiplicity_{nullptr};
 
 	TProfile* h_baseline_sparse_{nullptr};
 	TProfile* h_baseline_dense_{nullptr};
@@ -750,6 +890,194 @@ static TString channelLabel(int boardID, int chanID, int rawId, int sipmId)
 	return Form("B%03d C%02d (raw: %d, offline: %d)", boardID, chanID, rawId, sipmId);
 }
 
+void CaloDigiDQM::ensureLaserBoardBooked()
+{
+	if(!laserBoardHistDir_ || !laserBoardChanDir_)
+	{
+		art::TFileDirectory boardDir = laserDir_->mkdir("Board_160");
+
+		laserBoardHistDir_ =
+		    std::make_unique<art::TFileDirectory>(boardDir.mkdir("Histograms"));
+
+		laserBoardChanDir_ =
+		    std::make_unique<art::TFileDirectory>(boardDir.mkdir("Channels"));
+
+		laserBaselineDir_ =
+		    std::make_unique<art::TFileDirectory>(laserBoardChanDir_->mkdir("Baseline"));
+
+		laserRmsDir_ =
+		    std::make_unique<art::TFileDirectory>(laserBoardChanDir_->mkdir("RMS"));
+
+		laserMaxDir_ =
+		    std::make_unique<art::TFileDirectory>(laserBoardChanDir_->mkdir("Max"));
+	}
+
+	if(!laserBoardH_.occ)
+	{
+		art::TFileDirectory& histosDir = *laserBoardHistDir_;
+
+		laserBoardH_.occ = histosDir.make<TH1F>("B160_Occupancy",
+		                                        "Occupancy for Laser Board 160",
+		                                        kLaserChannels,
+		                                        0,
+		                                        kLaserChannels);
+		laserBoardH_.occ->GetXaxis()->SetTitle("Channel ID");
+		laserBoardH_.occ->GetYaxis()->SetTitle("Count");
+
+		laserBoardH_.base = histosDir.make<TProfile>("B160_Baseline",
+		                                             "Baseline for Laser Board 160",
+		                                             kLaserChannels,
+		                                             0,
+		                                             kLaserChannels);
+
+		laserBoardH_.rms = histosDir.make<TProfile>(
+		    "B160_RMS", "RMS for Laser Board 160", kLaserChannels, 0, kLaserChannels);
+
+		laserBoardH_.max = histosDir.make<TProfile>(
+		    "B160_Max", "Max for Laser Board 160", kLaserChannels, 0, kLaserChannels);
+
+		for(auto* p : {laserBoardH_.base, laserBoardH_.rms, laserBoardH_.max})
+		{
+			p->GetXaxis()->SetTitle("Channel ID");
+			p->SetMarkerStyle(20);
+		}
+
+		laserBoardH_.base->GetYaxis()->SetTitle("Mean Baseline [ADC]");
+		laserBoardH_.rms->GetYaxis()->SetTitle("Mean RMS [ADC]");
+		laserBoardH_.max->GetYaxis()->SetTitle("Mean Peak ADC [ADC]");
+	}
+}
+
+void CaloDigiDQM::ensureLaserBaselineDistBooked(int chanID)
+{
+	if(chanID < 0 || chanID >= kLaserChannels)
+		return;
+	if(laserBaselineDist_[(size_t)chanID])
+		return;
+	if(!laserBaselineDir_)
+		return;
+
+	art::TFileDirectory& dir = *laserBaselineDir_;
+
+	laserBaselineDist_[(size_t)chanID] =
+	    dir.make<TH1F>(Form("B160_C%02d_BaselineDist", chanID),
+	                   Form("Baseline Distribution B160 C%02d", chanID),
+	                   2000,
+	                   1000,
+	                   3000);
+
+	laserBaselineDist_[(size_t)chanID]->GetXaxis()->SetTitle("Baseline [ADC]");
+	laserBaselineDist_[(size_t)chanID]->GetYaxis()->SetTitle("Count");
+}
+
+void CaloDigiDQM::ensureLaserRmsDistBooked(int chanID)
+{
+	if(chanID < 0 || chanID >= kLaserChannels)
+		return;
+	if(laserRmsDist_[(size_t)chanID])
+		return;
+	if(!laserRmsDir_)
+		return;
+
+	art::TFileDirectory& dir = *laserRmsDir_;
+
+	laserRmsDist_[(size_t)chanID] =
+	    dir.make<TH1F>(Form("B160_C%02d_RMSDist", chanID),
+	                   Form("RMS Distribution B160 C%02d", chanID),
+	                   30,
+	                   0,
+	                   30);
+
+	laserRmsDist_[(size_t)chanID]->GetXaxis()->SetTitle("RMS [ADC]");
+	laserRmsDist_[(size_t)chanID]->GetYaxis()->SetTitle("Count");
+}
+
+void CaloDigiDQM::ensureLaserMaxDistBooked(int chanID)
+{
+	if(chanID < 0 || chanID >= kLaserChannels)
+		return;
+	if(laserMaxDist_[(size_t)chanID])
+		return;
+	if(!laserMaxDir_)
+		return;
+
+	art::TFileDirectory& dir = *laserMaxDir_;
+
+	laserMaxDist_[(size_t)chanID] =
+	    dir.make<TH1F>(Form("B160_C%02d_MaxDist", chanID),
+	                   Form("Max ADC Distribution B160 C%02d", chanID),
+	                   300,
+	                   0,
+	                   4500);
+
+	laserMaxDist_[(size_t)chanID]->GetXaxis()->SetTitle("Peak ADC");
+	laserMaxDist_[(size_t)chanID]->GetYaxis()->SetTitle("Count");
+}
+
+void CaloDigiDQM::ensureLaserLiveWaveformBooked(int chanID, int rawId, int sipmId)
+{
+	if(chanID < 0 || chanID >= kLaserChannels)
+		return;
+	if(laserLiveWf_[(size_t)chanID])
+		return;
+	if(!laserBoardHistDir_)
+		return;
+
+	art::TFileDirectory& histosDir = *laserBoardHistDir_;
+
+	TString cname  = Form("B160_C%02d_Waveform", chanID);
+	TString ctitle = Form("Live Waveform for %s",
+	                      channelLabel(kLaserBoardID, chanID, rawId, sipmId).Data());
+
+	laserLiveWf_[(size_t)chanID] =
+	    histosDir.make<TH1F>(cname, ctitle, kWaveformNBins, 0, kWaveformNBins);
+
+	laserLiveWf_[(size_t)chanID]->GetYaxis()->SetTitle("ADC - Baseline");
+	laserLiveWf_[(size_t)chanID]->GetXaxis()->SetTitle("Tick");
+}
+
+void CaloDigiDQM::ensureLaserFirstHitBooked(
+    int chanID, int rawId, int sipmId, auto const& waveform, int wfSize, float baseline)
+{
+	if(chanID < 0 || chanID >= kLaserChannels)
+		return;
+	if(laserOneHitSeen_[(size_t)chanID])
+		return;
+	if(!laserBoardChanDir_)
+		return;
+
+	art::TFileDirectory& chanDir = *laserBoardChanDir_;
+
+	TString cname  = Form("B160_C%02d_FirstHit", chanID);
+	TString ctitle = Form("First-Hit Waveform for %s",
+	                      channelLabel(kLaserBoardID, chanID, rawId, sipmId).Data());
+
+	TH1F* onehitHist =
+	    chanDir.make<TH1F>(cname, ctitle, kWaveformNBins, 0, kWaveformNBins);
+
+	onehitHist->GetYaxis()->SetTitle("ADC - Baseline");
+	onehitHist->GetXaxis()->SetTitle("Tick");
+
+	const int nb = onehitHist->GetNbinsX();
+	const int n  = std::min<int>(wfSize, nb);
+	for(int i = 0; i < n; ++i)
+		onehitHist->SetBinContent(i + 1, (double)waveform[(size_t)i] - (double)baseline);
+	for(int i = n; i < nb; ++i)
+		onehitHist->SetBinContent(i + 1, 0.0);
+
+	laserOneHitWf_[(size_t)chanID]   = onehitHist;
+	laserOneHitSeen_[(size_t)chanID] = 1u;
+	++pendingLaserFirstHits_;
+
+	if(h_global_waveform_density_)
+	{
+		const int nbx = h_global_waveform_density_->GetNbinsX();
+		const int n2  = std::min<int>(wfSize, nbx);
+		for(int i = 0; i < n2; ++i)
+			h_global_waveform_density_->Fill(i, (double)waveform[(size_t)i]);
+	}
+}
+
 void CaloDigiDQM::ensureBoardBooked(int disk, int boardID)
 {
 	// Lazily create per board directories and summary histograms
@@ -891,6 +1219,7 @@ void CaloDigiDQM::ensureFirstHitBooked(int         disk,
 
 	oneHitWf_[(size_t)cidx]   = onehitHist;
 	oneHitSeen_[(size_t)cidx] = 1u;
+	++pendingRegularFirstHits_;
 
 	if(h_global_waveform_density_)
 	{
@@ -907,7 +1236,6 @@ void CaloDigiDQM::ensureFirstHitBooked(int         disk,
 CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
     : art::EDAnalyzer{config}
     , caloDigiTag_{config().caloDigiModuleLabel()}
-    , caloDigiModuleLabel_(config().caloDigiModuleLabel())
     , freqDQM_(config().freqDQM())
     , freqWaveforms_(config().freqWaveforms())
     , address_(config().address())
@@ -1009,7 +1337,7 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	disk0Dir_  = std::make_unique<art::TFileDirectory>(tfs->mkdir("Disk0"));
 	disk1Dir_  = std::make_unique<art::TFileDirectory>(tfs->mkdir("Disk1"));
 	globalDir_ = std::make_unique<art::TFileDirectory>(tfs->mkdir("Global_Histograms"));
-
+	laserDir_  = std::make_unique<art::TFileDirectory>(tfs->mkdir("Laser"));
 	// -----------------------
 	// Stream selection controls otsdaq streaming only
 	// -----------------------
@@ -1044,7 +1372,10 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	liveWf_.assign(kTotalChannels, nullptr);
 	oneHitWf_.assign(kTotalChannels, nullptr);
 	oneHitSeen_.assign(kTotalChannels, 0u);
-	chSeen_.assign(kTotalChannels, 0u);
+	oneHitSent_.assign(kTotalChannels, 0u);
+	liveWaveformUpdated_.assign(kTotalChannels, 0u);
+	laserOneHitSent_.fill(0u);
+	laserLiveWaveformUpdated_.fill(0u);
 	wfStats_.assign(kTotalChannels, WaveformSizeStats{});
 	h_baseline_dist_.assign(kTotalChannels, nullptr);
 	h_rms_dist_.assign(kTotalChannels, nullptr);
@@ -1052,13 +1383,23 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	h_asym_dist_.assign(kTotalChannels, nullptr);
 	channelBooked_.assign(kTotalChannels, 0u);
 
+	activeRegularChannels_.reserve(kTotalChannels);
+	activeLaserChannels_.reserve(kLaserChannels);
+	updatedBoards_.reserve(kTotalBoards);
+	updatedRegularChannels_.reserve(kTotalChannels);
+	updatedLaserChannels_.reserve(kLaserChannels);
+
+	boardQueuedForSend_.assign(kTotalBoards, 0u);
+	regularQueuedForSend_.assign(kTotalChannels, 0u);
+	laserQueuedForSend_.fill(0u);
+
 	lastWf_.assign(kTotalChannels, std::array<float, kWaveformNBins>{});
-	lastWfSize_.assign(kTotalChannels, 0u);
 	lastWfValid_.assign(kTotalChannels, 0u);
 
 	feat_.assign((size_t)kMaxSipmIdForMaps_, SipmFeat{});
 	featStamp_.assign((size_t)kMaxSipmIdForMaps_, 0);
 	pairedStamp_.assign((size_t)(kMaxSipmIdForMaps_ / 2 + 2), 0);
+	sipmMultiplicity_.assign((size_t)kMaxSipmIdForMaps_, 0u);
 
 	for(auto m : kAllModes)
 	{
@@ -1108,7 +1449,7 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 		h_skip_reason_->GetXaxis()->SetBinLabel(i + 1, skipLabel((SkipReason)i));
 
 	h_global_board_vs_channel_ = globalDir_->make<TH2I>(
-	    "h_board_vs_channel", "Board vs Channel Occupancy", 160, 0, 160, 20, 0, 20);
+	    "h_board_vs_channel", "Board vs Channel Occupancy", 161, 0, 161, 20, 0, 20);
 	h_global_board_vs_channel_->GetXaxis()->SetTitle("Board ID");
 	h_global_board_vs_channel_->GetYaxis()->SetTitle("Channel ID");
 
@@ -1135,6 +1476,15 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	h_waveform_size_->GetXaxis()->SetTitle("waveform.size() [samples]");
 	h_waveform_size_->GetYaxis()->SetTitle("Count");
 
+	h_pair_multiplicity_ = globalDir_->make<TH1I>(
+	    "h_pair_multiplicity",
+	    "Paired crystal: max usable digi multiplicity per side per event",
+	    20,
+	    0,
+	    20);
+	h_pair_multiplicity_->GetXaxis()->SetTitle("max (usable digis in left/right SiPM)");
+	h_pair_multiplicity_->GetYaxis()->SetTitle("Count");
+
 	auto axisSparse = axisSparseGlobal();
 	auto axisDense  = axisDenseGlobal();
 
@@ -1143,7 +1493,7 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	                                             axisSparse.nBins,
 	                                             axisSparse.xMin,
 	                                             axisSparse.xMax);
-	h_occupancy_sparse_->GetXaxis()->SetTitle("Encoded Channel (boardID*80 + chanID)");
+	h_occupancy_sparse_->GetXaxis()->SetTitle("Encoded Channel (boardID*100 + chanID)");
 	h_occupancy_sparse_->GetYaxis()->SetTitle("Hit Count");
 
 	h_occupancy_dense_ = globalDir_->make<TH1F>("h_occ_dense",
@@ -1169,7 +1519,7 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	h_baseline_sparse_ = makeGlobalProfile("h_base_sparse",
 	                                       "Baseline (Sparse Encoding, All Disks)",
 	                                       axisSparse,
-	                                       "Encoded Channel (boardID*80 + chanID)",
+	                                       "Encoded Channel (boardID*100 + chanID)",
 	                                       "Mean Baseline [ADC]");
 
 	h_baseline_dense_ = makeGlobalProfile("h_base_dense",
@@ -1181,7 +1531,7 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	h_rms_sparse_ = makeGlobalProfile("h_rms_sparse",
 	                                  "RMS (Sparse Encoding, All Disks)",
 	                                  axisSparse,
-	                                  "Encoded Channel (boardID*80 + chanID)",
+	                                  "Encoded Channel (boardID*100 + chanID)",
 	                                  "Mean RMS [ADC]");
 
 	h_rms_dense_ = makeGlobalProfile("h_rms_dense",
@@ -1193,7 +1543,7 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	h_amp_sparse_ = makeGlobalProfile("h_amp_sparse",
 	                                  "Amplitude (Sparse Encoding, All Disks)",
 	                                  axisSparse,
-	                                  "Encoded Channel (boardID*80 + chanID)",
+	                                  "Encoded Channel (boardID*100 + chanID)",
 	                                  "Mean Amplitude [ADC]");
 
 	h_amp_dense_ = makeGlobalProfile("h_amp_dense",
@@ -1205,7 +1555,7 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	h_maxval_sparse_ = makeGlobalProfile("h_max_sparse",
 	                                     "Max ADC (Sparse Encoding, All Disks)",
 	                                     axisSparse,
-	                                     "Encoded Channel (boardID*80 + chanID)",
+	                                     "Encoded Channel (boardID*100 + chanID)",
 	                                     "Mean Peak ADC [ADC]");
 
 	h_maxval_dense_ = makeGlobalProfile("h_max_dense",
@@ -1220,7 +1570,7 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	h_asymmetry->GetYaxis()->SetTitle("Frequency");
 
 	h_global_board_dist_ =
-	    globalDir_->make<TH1F>("h_board_dist", "Global Board Distribution", 160, 0, 160);
+	    globalDir_->make<TH1F>("h_board_dist", "Global Board Distribution", 161, 0, 161);
 	h_global_board_dist_->GetXaxis()->SetTitle("Board ID");
 	h_global_board_dist_->GetYaxis()->SetTitle("Frequency");
 }
@@ -1241,28 +1591,56 @@ void CaloDigiDQM::analyze(art::Event const& event)
 		std::fill(pairedStamp_.begin(), pairedStamp_.end(), 0);
 		pairStamp_ = 1;
 	}
+	std::fill(sipmMultiplicity_.begin(), sipmMultiplicity_.end(), 0u);
 
-	// Local lambdas keep pairing logic readable and branch light
 	auto featSeen = [&](int sid) -> bool {
 		return (sid >= 0 && sid < kMaxSipmIdForMaps_ &&
 		        featStamp_[(size_t)sid] == pairStamp_);
 	};
+
 	auto markFeat = [&](int sid, SipmFeat const& f) {
 		if(sid < 0 || sid >= kMaxSipmIdForMaps_)
 			return;
 		feat_[(size_t)sid]      = f;
 		featStamp_[(size_t)sid] = pairStamp_;
 	};
+
 	auto paired = [&](int crystalId) -> bool {
 		if(crystalId < 0 || (size_t)crystalId >= pairedStamp_.size())
 			return true;
 		return pairedStamp_[(size_t)crystalId] == pairStamp_;
 	};
+
 	auto markPaired = [&](int crystalId) {
 		if(crystalId < 0 || (size_t)crystalId >= pairedStamp_.size())
 			return;
 		pairedStamp_[(size_t)crystalId] = pairStamp_;
 	};
+
+	auto betterRep = [&](SipmFeat const& cand, SipmFeat const& cur) -> bool {
+		if(cand.amp != cur.amp)
+			return cand.amp > cur.amp;  // prefer larger baseline-subtracted amplitude
+		if(cand.ampRaw != cur.ampRaw)
+			return cand.ampRaw > cur.ampRaw;
+		return cand.cidx < cur.cidx;  // stable tie-break
+	};
+
+	auto packRepWaveform =
+	    [&](SipmFeat& dst, auto const& waveform, float baseline, int wfSize) {
+		    const int n = std::min<int>(wfSize, kWaveformNBins);
+		    for(int i = 0; i < n; ++i)
+			    dst.wfSub[(size_t)i] = (float)waveform[(size_t)i] - baseline;
+
+		    for(int i = n; i < kWaveformNBins; ++i)
+			    dst.wfSub[(size_t)i] = 0.0f;
+	    };
+
+	std::vector<int> repSipmIds;
+	repSipmIds.reserve(caloDigis.size());
+	std::array<SipmFeat, kLaserChannels> laserRep{};
+	std::array<uint8_t, kLaserChannels>  laserRepSeen{};
+	std::vector<int>                     repLaserChannels;
+	repLaserChannels.reserve(kLaserChannels);
 
 	// Guard against noisy asymmetry when the denominator is too small
 	static constexpr double kMinDenomForAsym = 5.0;
@@ -1299,16 +1677,93 @@ void CaloDigiDQM::analyze(art::Event const& event)
 		const int boardID = rawId / kChannelsPerBoard;
 		const int chanID  = rawId % kChannelsPerBoard;
 
-		// Range checks keep array indexing safe and skip counters informative
-		if(chanID < 0 || chanID >= kChannelsPerBoard)
+		// -----------------------
+		// Laser board branch
+		// -----------------------
+		if(isLaserBoard(boardID))
 		{
-			recordSkip(SkipReason::ChanOutOfRange);
-			continue;
-		}
-		if(boardID < 0 || boardID >= (kBoardsPerDisk * kNDisks))
-		{
-			recordSkip(SkipReason::BoardOutOfRange);
-			++nFillMiss_;
+			++nFillLaser_;
+			ensureLaserBoardBooked();
+			laserBoardUpdated_ = true;
+
+			if(!laserChannelBooked_[(size_t)chanID])
+			{
+				ensureLaserBaselineDistBooked(chanID);
+				ensureLaserRmsDistBooked(chanID);
+				ensureLaserMaxDistBooked(chanID);
+				ensureLaserLiveWaveformBooked(chanID, rawId, sipmId);
+				laserChannelBooked_[(size_t)chanID] = 1u;
+				activeLaserChannels_.push_back(chanID);
+			}
+
+			if(h_global_board_dist_)
+				h_global_board_dist_->Fill(boardID);
+
+			if(h_global_board_vs_channel_)
+				h_global_board_vs_channel_->Fill(boardID, chanID);
+
+			if(laserBoardH_.occ)
+				laserBoardH_.occ->Fill(chanID);
+
+			// waveform-size monitoring
+			updateWaveformStats(laserWfStats_[(size_t)chanID], wfSize);
+
+			const int peakpos = digi.peakpos();
+			if(wfSize == 0 || peakpos < 0 || peakpos >= wfSize)
+			{
+				recordSkip(SkipReason::PeakPosOutOfRange);
+				continue;
+			}
+
+			float baseline = 0.0f;
+			float rms      = 0.0f;
+			if(!computeBaselineRms(waveform, wfSize, baseline, rms))
+			{
+				recordSkip(SkipReason::NonFiniteBaselineOrRms);
+				continue;
+			}
+
+			if(laserBaselineDist_[(size_t)chanID])
+				laserBaselineDist_[(size_t)chanID]->Fill(baseline);
+
+			if(laserRmsDist_[(size_t)chanID])
+				laserRmsDist_[(size_t)chanID]->Fill(rms);
+
+			ensureLaserFirstHitBooked(chanID, rawId, sipmId, waveform, wfSize, baseline);
+
+			const float  ampRaw = waveform[(size_t)peakpos];
+			const double amp    = (double)ampRaw - (double)baseline;
+
+			SipmFeat cand{};
+			cand.amp      = amp;
+			cand.baseline = baseline;
+			cand.rms      = rms;
+			cand.ampRaw   = (double)ampRaw;
+			cand.disk     = -1;
+			cand.board    = kLaserBoardID;
+			cand.chan     = chanID;
+			cand.cidx     = -1;
+
+			packRepWaveform(cand, waveform, baseline, wfSize);
+
+			if(!laserRepSeen[(size_t)chanID])
+			{
+				laserRep[(size_t)chanID]     = cand;
+				laserRepSeen[(size_t)chanID] = 1u;
+				repLaserChannels.push_back(chanID);
+			}
+			else if(betterRep(cand, laserRep[(size_t)chanID]))
+			{
+				laserRep[(size_t)chanID] = cand;
+			}
+
+			if(laserMaxDist_[(size_t)chanID])
+				laserMaxDist_[(size_t)chanID]->Fill(ampRaw);
+
+			if(h_amp_dist_)
+				h_amp_dist_->Fill(amp);
+
+			// laser board should not go into disk maps or L/R pairing
 			continue;
 		}
 
@@ -1320,24 +1775,10 @@ void CaloDigiDQM::analyze(art::Event const& event)
 			continue;
 		}
 
-		const int bmin = boardMinForDisk(disk);
-		if(boardID < bmin || boardID >= bmin + kBoardsPerDisk)
-		{
-			recordSkip(SkipReason::BoardOutOfRange);
-			++nFillMiss_;
-			continue;
-		}
-
 		// Encoded is per disk, cidx is global across disks
 		const int encodedSparse = encodeSparse(boardID, chanID);
 		const int encodedDense  = encodeDense(boardID, chanID);
 		const int cidx          = channelIndex(disk, boardID, chanID);
-		if(cidx < 0 || cidx >= kTotalChannels)
-		{
-			recordSkip(SkipReason::ChanOutOfRange);
-			++nFillMiss_;
-			continue;
-		}
 
 		ensureBoardBooked(disk, boardID);
 
@@ -1348,9 +1789,8 @@ void CaloDigiDQM::analyze(art::Event const& event)
 			ensureMaxDistBooked(disk, boardID, chanID);
 			ensureLiveWaveformBooked(disk, boardID, chanID, rawId, sipmId);
 			channelBooked_[(size_t)cidx] = 1u;
+			activeRegularChannels_.push_back(cidx);
 		}
-		// Track which channels were observed for endJob summaries
-		chSeen_[(size_t)cidx] = 1u;
 
 		if(disk == 0)
 			++nFillDisk0_;
@@ -1378,34 +1818,15 @@ void CaloDigiDQM::analyze(art::Event const& event)
 			auto& bh = boardH_[(size_t)bidx];
 			if(bh.occ)
 				bh.occ->Fill(chanID);
+			if(!boardQueuedForSend_[(size_t)bidx])
+			{
+				updatedBoards_.push_back(bidx);
+				boardQueuedForSend_[(size_t)bidx] = 1u;
+			}
 		}
 
 		// Collect waveform length behavior per channel for integrity monitoring
-		{
-			const uint32_t sz = (uint32_t)wfSize;
-			auto&          st = wfStats_[(size_t)cidx];
-
-			if(st.nSeen == 0)
-				st.first = st.last = st.min = st.max = sz;
-			else
-			{
-				if(sz != st.first)
-					st.nMismatchToFirst++;
-				if(sz != st.last)
-					st.nTransitions++;
-				if(sz < st.min)
-					st.min = sz;
-				if(sz > st.max)
-					st.max = sz;
-				st.last = sz;
-			}
-
-			st.nSeen++;
-			if(sz > (uint32_t)kWaveformNBins)
-				st.nTruncated++;
-			else if(sz < (uint32_t)kWaveformNBins)
-				st.nPadded++;
-		}
+		updateWaveformStats(wfStats_[(size_t)cidx], wfSize);
 
 		// Peak position integrity checks
 		const int peakpos = digi.peakpos();
@@ -1417,37 +1838,23 @@ void CaloDigiDQM::analyze(art::Event const& event)
 		}
 
 		// Baseline and RMS from the first samples, robust against small wfSize
-		const int nBase = std::min<int>(5, wfSize);
 
-		float sum   = 0.0f;
-		float sumsq = 0.0f;
-		for(int i = 0; i < nBase; ++i)
-		{
-			const float x = waveform[(size_t)i];
-			sum += x;
-			sumsq += x * x;
-		}
-
-		const float baseline = sum / (float)nBase;
-		const float mean_sq  = sumsq / (float)nBase;
-		const float rms      = (mean_sq > baseline * baseline)
-		                           ? std::sqrt(mean_sq - baseline * baseline)
-		                           : 0.0f;
-
-		if(!std::isfinite(baseline) || !std::isfinite(rms))
+		float baseline = 0.0f;
+		float rms      = 0.0f;
+		if(!computeBaselineRms(waveform, wfSize, baseline, rms))
 		{
 			recordSkip(SkipReason::NonFiniteBaselineOrRms);
 			continue;
 		}
+
+		if(sipmId >= 0 && sipmId < kMaxSipmIdForMaps_)
+			++sipmMultiplicity_[(size_t)sipmId];
 
 		if(h_baseline_dist_[(size_t)cidx])
 			h_baseline_dist_[(size_t)cidx]->Fill(baseline);
 
 		if(h_rms_dist_[(size_t)cidx])
 			h_rms_dist_[(size_t)cidx]->Fill(rms);
-
-		// Cache waveform for later streaming without reallocations
-		cacheWaveform(cidx, waveform, baseline);
 
 		// Book and fill waveform products for offline and streaming use
 		ensureFirstHitBooked(
@@ -1459,134 +1866,215 @@ void CaloDigiDQM::analyze(art::Event const& event)
 
 		if(h_max_dist_[(size_t)cidx])
 			h_max_dist_[(size_t)cidx]->Fill(ampRaw);
-
-		if(h_amp_sparse_)
-			h_amp_sparse_->Fill(encodedSparse, amp);
-		if(h_amp_dense_)
-			h_amp_dense_->Fill(encodedDense, amp);
 		if(h_amp_dist_)
 			h_amp_dist_->Fill(amp);
 
+		SipmFeat cand{};
+		cand.amp      = amp;
+		cand.baseline = baseline;
+		cand.rms      = rms;
+		cand.ampRaw   = (double)ampRaw;
+		cand.disk     = disk;
+		cand.board    = boardID;
+		cand.chan     = chanID;
+		cand.cidx     = cidx;
+		packRepWaveform(cand, waveform, baseline, wfSize);
+
+		if(!featSeen(sipmId))
+		{
+			markFeat(sipmId, cand);
+			repSipmIds.push_back(sipmId);
+		}
+		else if(betterRep(cand, feat_[(size_t)sipmId]))
+		{
+			markFeat(sipmId, cand);
+		}
+	}
+
+	// Multiple usable digis per SiPM can occur in one event.
+	// Pair-based quantities use one representative digi per SiPM,
+	// selected earlier by highest baseline-subtracted amplitude.
+	for(int sipmId : repSipmIds)
+	{
+		const auto& f = feat_[(size_t)sipmId];
+
+		if(f.cidx >= 0 && f.cidx < kTotalChannels)
+		{
+			lastWf_[(size_t)f.cidx]      = f.wfSub;
+			lastWfValid_[(size_t)f.cidx] = 1u;
+
+			liveWaveformUpdated_[(size_t)f.cidx] = 1u;
+			if(!regularQueuedForSend_[(size_t)f.cidx])
+			{
+				updatedRegularChannels_.push_back(f.cidx);
+				regularQueuedForSend_[(size_t)f.cidx] = 1u;
+			}
+		}
+
+		const int encodedSparse = encodeSparse(f.board, f.chan);
+		const int encodedDense  = encodeDense(f.board, f.chan);
+		const int bidx          = boardIndex(f.disk, f.board);
+
+		if(h_amp_sparse_)
+			h_amp_sparse_->Fill(encodedSparse, f.amp);
+		if(h_amp_dense_)
+			h_amp_dense_->Fill(encodedDense, f.amp);
+
 		if(h_baseline_sparse_)
-			h_baseline_sparse_->Fill(encodedSparse, baseline);
+			h_baseline_sparse_->Fill(encodedSparse, f.baseline);
 		if(h_baseline_dense_)
-			h_baseline_dense_->Fill(encodedDense, baseline);
+			h_baseline_dense_->Fill(encodedDense, f.baseline);
 
 		if(h_rms_sparse_)
-			h_rms_sparse_->Fill(encodedSparse, rms);
+			h_rms_sparse_->Fill(encodedSparse, f.rms);
 		if(h_rms_dense_)
-			h_rms_dense_->Fill(encodedDense, rms);
+			h_rms_dense_->Fill(encodedDense, f.rms);
 
 		if(h_maxval_sparse_)
-			h_maxval_sparse_->Fill(encodedSparse, ampRaw);
+			h_maxval_sparse_->Fill(encodedSparse, f.ampRaw);
 		if(h_maxval_dense_)
-			h_maxval_dense_->Fill(encodedDense, ampRaw);
+			h_maxval_dense_->Fill(encodedDense, f.ampRaw);
 
-		// Board-level profiles reuse bidx computed above
 		if(bidx >= 0 && bidx < kTotalBoards)
 		{
 			auto& bh = boardH_[(size_t)bidx];
 			if(bh.base)
-				bh.base->Fill(chanID, baseline);
+				bh.base->Fill(f.chan, f.baseline);
 			if(bh.rms)
-				bh.rms->Fill(chanID, rms);
+				bh.rms->Fill(f.chan, f.rms);
 			if(bh.max)
-				bh.max->Fill(chanID, ampRaw);
+				bh.max->Fill(f.chan, f.ampRaw);
 		}
 
-		// Accumulate per SiPM means for disk maps
 		if(modeEnabled(MapMode::Amp))
-			accDisk(MapMode::Amp, disk, sipmId, amp);
+			accDisk(MapMode::Amp, f.disk, sipmId, f.amp);
 		if(modeEnabled(MapMode::Baseline))
-			accDisk(MapMode::Baseline, disk, sipmId, baseline);
+			accDisk(MapMode::Baseline, f.disk, sipmId, f.baseline);
 		if(modeEnabled(MapMode::RMS))
-			accDisk(MapMode::RMS, disk, sipmId, rms);
+			accDisk(MapMode::RMS, f.disk, sipmId, f.rms);
+	}
 
-		// Store features for later pairing into crystals
-		markFeat(
-		    sipmId,
-		    SipmFeat{amp, baseline, rms, (double)ampRaw, disk, boardID, chanID, cidx});
-
-		// Pair two SiPMs per crystal and compute sum and asymmetry once per pair
+	for(int sipmId : repSipmIds)
+	{
 		const int crystalId = sipmId / 2;
-		if(!paired(crystalId))
+		if(paired(crystalId))
+			continue;
+
+		const int evenId = 2 * crystalId;
+		const int oddId  = evenId + 1;
+
+		if(!(featSeen(evenId) && featSeen(oddId)))
+			continue;
+
+		const int multL = (evenId >= 0 && evenId < kMaxSipmIdForMaps_)
+		                      ? (int)sipmMultiplicity_[(size_t)evenId]
+		                      : 0;
+		const int multR = (oddId >= 0 && oddId < kMaxSipmIdForMaps_)
+		                      ? (int)sipmMultiplicity_[(size_t)oddId]
+		                      : 0;
+
+		if(h_pair_multiplicity_)
+			h_pair_multiplicity_->Fill(std::max(multL, multR));
+
+		markPaired(crystalId);
+
+		const auto& fL = feat_[(size_t)evenId];
+		const auto& fR = feat_[(size_t)oddId];
+
+		const double L     = fL.amp;
+		const double R     = fR.amp;
+		const double denom = L + R;
+
+		if(std::abs(denom) <= kMinDenomForAsym)
 		{
-			const int evenId = 2 * crystalId;
-			const int oddId  = evenId + 1;
+			recordSkip(SkipReason::TinyDenomAsym);
+			continue;
+		}
 
-			if(featSeen(evenId) && featSeen(oddId))
-			{
-				markPaired(crystalId);
+		const double sumLR = denom;
+		const double asym  = (L - R) / denom;
 
-				const auto& fL = feat_[(size_t)evenId];
-				const auto& fR = feat_[(size_t)oddId];
+		ensureAsymDistBooked(fL.disk, fL.board, fL.chan);
+		ensureAsymDistBooked(fR.disk, fR.board, fR.chan);
 
-				const double L = fL.amp;
-				const double R = fR.amp;
+		const int cidxL = fL.cidx;
+		const int cidxR = fR.cidx;
 
-				const double denom = L + R;
+		if(cidxL >= 0 && cidxL < kTotalChannels && h_asym_dist_[(size_t)cidxL])
+			h_asym_dist_[(size_t)cidxL]->Fill(asym);
 
-				if(std::abs(denom) <= kMinDenomForAsym)
-				{
-					recordSkip(SkipReason::TinyDenomAsym);
-					continue;
-				}
+		if(cidxR >= 0 && cidxR < kTotalChannels && h_asym_dist_[(size_t)cidxR])
+			h_asym_dist_[(size_t)cidxR]->Fill(asym);
 
-				const double sumLR = denom;
-				const double asym  = (L - R) / denom;
+		if(h_asymmetry)
+			h_asymmetry->Fill(asym);
 
-				ensureAsymDistBooked(fL.disk, fL.board, fL.chan);
-				ensureAsymDistBooked(fR.disk, fR.board, fR.chan);
+		if(modeEnabled(MapMode::Sum))
+		{
+			accDisk(MapMode::Sum, fL.disk, evenId, sumLR);
+			accDisk(MapMode::Sum, fR.disk, oddId, sumLR);
+		}
+		if(modeEnabled(MapMode::Asym))
+		{
+			accDisk(MapMode::Asym, fL.disk, evenId, asym);
+			accDisk(MapMode::Asym, fR.disk, oddId, asym);
+		}
 
-				const int cidxL = fL.cidx;
-				const int cidxR = fR.cidx;
+		if(fL.disk != fR.disk)
+		{
+			mf::LogWarning("CaloDigiDQM")
+			    << "Disk mismatch for paired crystal " << crystalId << " (SiPM " << evenId
+			    << " in disk " << fL.disk << ", SiPM " << oddId << " in disk " << fR.disk
+			    << ").";
+		}
+	}
 
-				if(cidxL >= 0 && cidxL < kTotalChannels && h_asym_dist_[(size_t)cidxL])
-					h_asym_dist_[(size_t)cidxL]->Fill(asym);
+	for(int chan : repLaserChannels)
+	{
+		const auto& f = laserRep[(size_t)chan];
 
-				if(cidxR >= 0 && cidxR < kTotalChannels && h_asym_dist_[(size_t)cidxR])
-					h_asym_dist_[(size_t)cidxR]->Fill(asym);
+		if(laserBoardH_.base)
+			laserBoardH_.base->Fill(chan, f.baseline);
+		if(laserBoardH_.rms)
+			laserBoardH_.rms->Fill(chan, f.rms);
+		if(laserBoardH_.max)
+			laserBoardH_.max->Fill(chan, f.ampRaw);
 
-				if(h_asymmetry)
-					h_asymmetry->Fill(asym);
+		laserLastWf_[(size_t)chan]      = f.wfSub;
+		laserLastWfValid_[(size_t)chan] = 1u;
 
-				const int dL = fL.disk;
-				const int dR = fR.disk;
-
-				if(modeEnabled(MapMode::Sum))
-				{
-					accDisk(MapMode::Sum, dL, evenId, sumLR);
-					accDisk(MapMode::Sum, dR, oddId, sumLR);
-				}
-				if(modeEnabled(MapMode::Asym))
-				{
-					accDisk(MapMode::Asym, dL, evenId, asym);
-					accDisk(MapMode::Asym, dR, oddId, asym);
-				}
-
-				// Disk mismatch is unexpected and indicates mapping inconsistency
-				if(dL != dR)
-				{
-					mf::LogWarning("CaloDigiDQM")
-					    << "Disk mismatch for paired crystal " << crystalId << " (SiPM "
-					    << evenId << " in disk " << dL << ", SiPM " << oddId
-					    << " in disk " << dR << ").";
-				}
-			}
+		laserLiveWaveformUpdated_[(size_t)chan] = 1u;
+		if(!laserQueuedForSend_[(size_t)chan])
+		{
+			updatedLaserChannels_.push_back(chan);
+			laserQueuedForSend_[(size_t)chan] = 1u;
 		}
 	}
 
 	++eventCounter_;
-	++waveformCounter_;
 
-	// Decide which groups to send this event, avoid any work if nothing is due
+	// Decide which groups are scheduled to be sent this event
 	const bool doSummariesEvent = (freqDQM_ > 0) && (eventCounter_ % freqDQM_ == 0);
-	const bool doWaveforms =
-	    (freqWaveforms_ > 0) && (waveformCounter_ % freqWaveforms_ == 0);
+	bool doWaveforms = (freqWaveforms_ > 0) && (eventCounter_ % freqWaveforms_ == 0);
 
 	const int  diskMapPeriod = (freqDQM_ > 0) ? (freqDQM_ + kDiskMapsExtraPeriod) : 0;
 	const bool doDiskMaps =
 	    enableDiskMaps_ && (diskMapPeriod > 0) && (eventCounter_ % diskMapPeriod == 0);
+
+	// Extra optimization:
+	// if waveform streaming is scheduled, but there are no live updates
+	// and no unsent first-hit waveforms, skip waveform sending entirely.
+	if(doWaveforms)
+	{
+		const bool haveWaveformUpdates =
+		    !updatedRegularChannels_.empty() || !updatedLaserChannels_.empty();
+
+		const bool havePendingFirstHits =
+		    (pendingRegularFirstHits_ > 0) || (pendingLaserFirstHits_ > 0);
+
+		if(!haveWaveformUpdates && !havePendingFirstHits)
+			doWaveforms = false;
+	}
 
 	if(!doSummariesEvent && !doWaveforms && !doDiskMaps)
 		return;
@@ -1600,14 +2088,34 @@ void CaloDigiDQM::analyze(art::Event const& event)
 		refreshDiskMaps();
 
 	if(doWaveforms)
-		flushAllLiveWaveforms();
+	{
+		flushUpdatedLiveWaveforms();
+		flushUpdatedLaserLiveWaveforms();
+	}
 
 	// Group histograms by otsdaq folder, use :replace to refresh plots in place
 	std::map<std::string, std::vector<TH1*>> hists_to_send;
+	std::vector<int>                         regularOneHitSentThisCall;
+	std::vector<int>                         laserOneHitSentThisCall;
+	std::vector<int>                         regularLiveSentThisCall;
+	std::vector<int>                         laserLiveSentThisCall;
 
 	if(doSummariesEvent)
 	{
 		auto& g = hists_to_send[moduleTag_ + "/Global:replace"];
+
+		if(laserBoardUpdated_)
+		{
+			auto& lg = hists_to_send[moduleTag_ + "/Laser/Board160:replace"];
+			if(laserBoardH_.occ)
+				lg.push_back(laserBoardH_.occ);
+			if(laserBoardH_.base)
+				lg.push_back(laserBoardH_.base);
+			if(laserBoardH_.rms)
+				lg.push_back(laserBoardH_.rms);
+			if(laserBoardH_.max)
+				lg.push_back(laserBoardH_.max);
+		}
 
 		if(h_occupancy_sparse_)
 			g.push_back(h_occupancy_sparse_);
@@ -1650,44 +2158,45 @@ void CaloDigiDQM::analyze(art::Event const& event)
 			g.push_back(h_global_waveform_density_);
 		if(h_waveform_size_)
 			g.push_back(h_waveform_size_);
+		if(h_pair_multiplicity_)
+			g.push_back(h_pair_multiplicity_);
 		if(h_skip_reason_)
 			g.push_back(h_skip_reason_);
 
 		// Stream per board summaries only for boards that were booked
-		for(int disk = 0; disk < kNDisks; ++disk)
+		for(int bidx : updatedBoards_)
 		{
-			for(int blocal = 0; blocal < kBoardsPerDisk; ++blocal)
+			const int disk    = bidx / kBoardsPerDisk;
+			const int blocal  = bidx % kBoardsPerDisk;
+			const int boardID = boardIdFromDiskAndLocal(disk, blocal);
+
+			std::string groupPath =
+			    Form("%s/Disk%d/Board%03d:replace", moduleTag_.c_str(), disk, boardID);
+
+			if(disk == 0 && boardID == 27)
 			{
-				const int boardID = boardIdFromDiskAndLocal(disk, blocal);
-				const int bidx    = disk * kBoardsPerDisk + blocal;
-
-				std::string groupPath = Form(
-				    "%s/Disk%d/Board%03d:replace", moduleTag_.c_str(), disk, boardID);
-
-				if(disk == 0 && boardID == 27)
-				{
-					if(ref_D0_B027_Occupancy_)
-						hists_to_send[groupPath].push_back(ref_D0_B027_Occupancy_);
-					if(ref_D0_B027_Baseline_)
-						hists_to_send[groupPath].push_back(ref_D0_B027_Baseline_);
-					if(ref_D0_B027_RMS_)
-						hists_to_send[groupPath].push_back(ref_D0_B027_RMS_);
-					if(ref_D0_B027_Max_)
-						hists_to_send[groupPath].push_back(ref_D0_B027_Max_);
-				}
-				const auto& bh = boardH_[(size_t)bidx];
-				if(!bh.occ)
-					continue;
-
-				if(bh.occ)
-					hists_to_send[groupPath].push_back(bh.occ);
-				if(bh.base)
-					hists_to_send[groupPath].push_back(bh.base);
-				if(bh.rms)
-					hists_to_send[groupPath].push_back(bh.rms);
-				if(bh.max)
-					hists_to_send[groupPath].push_back(bh.max);
+				if(ref_D0_B027_Occupancy_)
+					hists_to_send[groupPath].push_back(ref_D0_B027_Occupancy_);
+				if(ref_D0_B027_Baseline_)
+					hists_to_send[groupPath].push_back(ref_D0_B027_Baseline_);
+				if(ref_D0_B027_RMS_)
+					hists_to_send[groupPath].push_back(ref_D0_B027_RMS_);
+				if(ref_D0_B027_Max_)
+					hists_to_send[groupPath].push_back(ref_D0_B027_Max_);
 			}
+
+			const auto& bh = boardH_[(size_t)bidx];
+			if(!bh.occ)
+				continue;
+
+			if(bh.occ)
+				hists_to_send[groupPath].push_back(bh.occ);
+			if(bh.base)
+				hists_to_send[groupPath].push_back(bh.base);
+			if(bh.rms)
+				hists_to_send[groupPath].push_back(bh.rms);
+			if(bh.max)
+				hists_to_send[groupPath].push_back(bh.max);
 		}
 	}
 
@@ -1711,48 +2220,137 @@ void CaloDigiDQM::analyze(art::Event const& event)
 
 	if(doWaveforms)
 	{
-		// Stream waveforms grouped by disk and board to keep dashboard navigation stable
-		for(int disk = 0; disk < kNDisks; ++disk)
+		for(int chan : updatedLaserChannels_)
 		{
-			for(int blocal = 0; blocal < kBoardsPerDisk; ++blocal)
+			std::string livePath = Form("%s/Laser/Waveforms/Board160/Channel%02d:replace",
+			                            moduleTag_.c_str(),
+			                            chan);
+
+			if(laserLiveWf_[(size_t)chan] && laserLiveWaveformUpdated_[(size_t)chan])
 			{
-				const int boardID = boardIdFromDiskAndLocal(disk, blocal);
+				hists_to_send[livePath].push_back(laserLiveWf_[(size_t)chan]);
+				laserLiveSentThisCall.push_back(chan);
+			}
+		}
+		for(int chan : activeLaserChannels_)
+		{
+			std::string oneHitPath =
+			    Form("%s/Laser/OneHitWaveforms/Board160/Channel%02d:replace",
+			         moduleTag_.c_str(),
+			         chan);
 
-				std::string livePath = Form("%s/Waveforms/Disk%d/Board%03d:replace",
-				                            moduleTag_.c_str(),
-				                            disk,
-				                            boardID);
-				std::string oneHitPath =
-				    Form("%s/OneHitWaveforms/Disk%d/Board%03d:replace",
-				         moduleTag_.c_str(),
-				         disk,
-				         boardID);
+			if(laserOneHitWf_[(size_t)chan] && !laserOneHitSent_[(size_t)chan])
+			{
+				hists_to_send[oneHitPath].push_back(laserOneHitWf_[(size_t)chan]);
+				laserOneHitSentThisCall.push_back(chan);
+			}
+		}
+		// live waveforms grouped by disk/board: only updated channels
+		for(int cidx : updatedRegularChannels_)
+		{
+			const int disk    = diskFromCidx(cidx);
+			const int enc     = encodedFromCidx(cidx);
+			const int blocal  = boardLocalFromEncoded(enc);
+			const int chan    = chanFromEncoded(enc);
+			const int boardID = boardIdFromDiskAndLocal(disk, blocal);
 
-				for(int chan = 0; chan < kChannelsPerBoard; ++chan)
-				{
-					const int cidx =
-					    disk * kChannelsPerDisk + blocal * kChannelsPerBoard + chan;
+			std::string livePath =
+			    Form("%s/Waveforms/Disk%d/Board%03d/Channel%02d:replace",
+			         moduleTag_.c_str(),
+			         disk,
+			         boardID,
+			         chan);
 
-					if(disk == 0 && boardID == 27 && chan == 0)
-					{
-						if(ref_D0_B027_C00_Waveform_)
-							hists_to_send[livePath].push_back(ref_D0_B027_C00_Waveform_);
-					}
+			if(disk == 0 && boardID == 27 && chan == 0)
+			{
+				if(ref_D0_B027_C00_Waveform_)
+					hists_to_send[livePath].push_back(ref_D0_B027_C00_Waveform_);
+			}
 
-					if(liveWf_[(size_t)cidx])
-						hists_to_send[livePath].push_back(liveWf_[(size_t)cidx]);
-					if(oneHitWf_[(size_t)cidx])
-						hists_to_send[oneHitPath].push_back(oneHitWf_[(size_t)cidx]);
-				}
+			if(liveWf_[(size_t)cidx] && liveWaveformUpdated_[(size_t)cidx])
+			{
+				hists_to_send[livePath].push_back(liveWf_[(size_t)cidx]);
+				regularLiveSentThisCall.push_back(cidx);
+			}
+		}
+
+		// first-hit waveforms grouped by disk/board: any active channel with unsent first hit
+		for(int cidx : activeRegularChannels_)
+		{
+			const int disk    = diskFromCidx(cidx);
+			const int enc     = encodedFromCidx(cidx);
+			const int blocal  = boardLocalFromEncoded(enc);
+			const int chan    = chanFromEncoded(enc);
+			const int boardID = boardIdFromDiskAndLocal(disk, blocal);
+
+			std::string oneHitPath =
+			    Form("%s/OneHitWaveforms/Disk%d/Board%03d/Channel%02d:replace",
+			         moduleTag_.c_str(),
+			         disk,
+			         boardID,
+			         chan);
+
+			if(oneHitWf_[(size_t)cidx] && !oneHitSent_[(size_t)cidx])
+			{
+				hists_to_send[oneHitPath].push_back(oneHitWf_[(size_t)cidx]);
+				regularOneHitSentThisCall.push_back(cidx);
 			}
 		}
 	}
 
 	// Streaming failures are rate limited by disabling sendHists_ after repeated errors
+	if(hists_to_send.empty())
+		return;
 	try
 	{
 		histSender_->sendHistograms(hists_to_send);
 		histSendErrorCount_ = 0;
+		for(int cidx : regularOneHitSentThisCall)
+		{
+			if(!oneHitSent_[(size_t)cidx])
+			{
+				oneHitSent_[(size_t)cidx] = 1u;
+				if(pendingRegularFirstHits_ > 0)
+					--pendingRegularFirstHits_;
+			}
+		}
+
+		for(int chan : laserOneHitSentThisCall)
+		{
+			if(!laserOneHitSent_[(size_t)chan])
+			{
+				laserOneHitSent_[(size_t)chan] = 1u;
+				if(pendingLaserFirstHits_ > 0)
+					--pendingLaserFirstHits_;
+			}
+		}
+
+		for(int cidx : regularLiveSentThisCall)
+			liveWaveformUpdated_[(size_t)cidx] = 0u;
+
+		for(int chan : laserLiveSentThisCall)
+			laserLiveWaveformUpdated_[(size_t)chan] = 0u;
+
+		// clear board-summary queues only if summaries were actually sent
+		if(doSummariesEvent)
+		{
+			for(int bidx : updatedBoards_)
+				boardQueuedForSend_[(size_t)bidx] = 0u;
+			updatedBoards_.clear();
+			laserBoardUpdated_ = false;
+		}
+
+		// clear waveform queues only if waveforms were actually sent
+		if(doWaveforms)
+		{
+			for(int cidx : updatedRegularChannels_)
+				regularQueuedForSend_[(size_t)cidx] = 0u;
+			updatedRegularChannels_.clear();
+
+			for(int chan : updatedLaserChannels_)
+				laserQueuedForSend_[(size_t)chan] = 0u;
+			updatedLaserChannels_.clear();
+		}
 	}
 	catch(const std::exception& e)
 	{
@@ -1793,6 +2391,7 @@ void CaloDigiDQM::endJob()
 {
 	// Final flush ensures ROOT output captures last cached values
 	flushAllLiveWaveforms();
+	flushAllLaserLiveWaveforms();
 	refreshDiskMaps();
 
 	// Summarize skip reasons for quick run validation
@@ -1808,7 +2407,8 @@ void CaloDigiDQM::endJob()
 
 	mf::LogInfo("CaloDigiDQM") << "CaloDigiDQM summary:"
 	                           << " events=" << eventCounter_ << " d0=" << nFillDisk0_
-	                           << " d1=" << nFillDisk1_ << " miss=" << nFillMiss_
+	                           << " d1=" << nFillDisk1_ << " laser=" << nFillLaser_
+	                           << " miss=" << nFillMiss_
 	                           << " sendErr=" << histSendErrorCount_
 	                           << " badSipmId=" << nBadSipmId_ << skips.str();
 
@@ -1822,10 +2422,8 @@ void CaloDigiDQM::endJob()
 	offenders.reserve((size_t)kTotalChannels);
 
 	size_t seenCount = 0;
-	for(int cidx = 0; cidx < kTotalChannels; ++cidx)
+	for(int cidx : activeRegularChannels_)
 	{
-		if(!chSeen_[(size_t)cidx])
-			continue;
 		++seenCount;
 		const auto& st = wfStats_[(size_t)cidx];
 		if(st.nSeen && st.min != st.max)
@@ -1848,7 +2446,7 @@ void CaloDigiDQM::endJob()
 	                           << " variable=" << offenders.size()
 	                           << " nbins=" << kWaveformNBins;
 
-	const size_t top = std::min<size_t>(20, offenders.size());
+	const size_t top = std::min<size_t>(10, offenders.size());
 	if(top)
 	{
 		// Print a compact top list to support debugging and data quality follow-up
@@ -1872,6 +2470,60 @@ void CaloDigiDQM::endJob()
 			//   pad      = number of waveforms shorter than kWaveformNBins
 			//   trunc    = number of waveforms longer than kWaveformNBins
 			os << "  (D" << disk << " B" << boardID << " C" << chan << ")"
+			   << " first=" << r.st.first << " min=" << r.st.min << " max=" << r.st.max
+			   << " seen=" << r.st.nSeen << " trans=" << r.st.nTransitions
+			   << " mismatch=" << r.st.nMismatchToFirst << " pad=" << r.st.nPadded
+			   << " trunc=" << r.st.nTruncated << "\n";
+		}
+		mf::LogInfo("CaloDigiDQM") << os.str();
+	}
+	// -----------------------
+	// Laser waveform-size summary
+	// -----------------------
+	struct LaserRow
+	{
+		int               chan;
+		WaveformSizeStats st;
+	};
+
+	std::vector<LaserRow> laserOffenders;
+	laserOffenders.reserve((size_t)kLaserChannels);
+
+	size_t laserSeenCount = 0;
+	for(int chan : activeLaserChannels_)
+	{
+		++laserSeenCount;
+		const auto& st = laserWfStats_[(size_t)chan];
+		if(st.nSeen && st.min != st.max)
+			laserOffenders.push_back(LaserRow{chan, st});
+	}
+
+	std::sort(laserOffenders.begin(),
+	          laserOffenders.end(),
+	          [](const LaserRow& a, const LaserRow& b) {
+		          if(a.st.nTransitions != b.st.nTransitions)
+			          return a.st.nTransitions > b.st.nTransitions;
+		          const uint32_t ra = a.st.max - a.st.min;
+		          const uint32_t rb = b.st.max - b.st.min;
+		          if(ra != rb)
+			          return ra > rb;
+		          return a.st.nMismatchToFirst > b.st.nMismatchToFirst;
+	          });
+
+	mf::LogInfo("CaloDigiDQM") << "Laser waveform-size summary:"
+	                           << " channels_seen=" << laserSeenCount
+	                           << " variable=" << laserOffenders.size()
+	                           << " nbins=" << kWaveformNBins;
+
+	const size_t laserTop = std::min<size_t>(10, laserOffenders.size());
+	if(laserTop)
+	{
+		std::ostringstream os;
+		os << "Top " << laserTop << " variable-size laser channels:\n";
+		for(size_t i = 0; i < laserTop; ++i)
+		{
+			const auto& r = laserOffenders[i];
+			os << "  (Laser B160 C" << r.chan << ")"
 			   << " first=" << r.st.first << " min=" << r.st.min << " max=" << r.st.max
 			   << " seen=" << r.st.nSeen << " trans=" << r.st.nTransitions
 			   << " mismatch=" << r.st.nMismatchToFirst << " pad=" << r.st.nPadded
