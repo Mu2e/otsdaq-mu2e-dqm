@@ -22,15 +22,13 @@
 
 //ROOT:
 //#include "art/Framework/Services/Optional/TFileService.h"
-#include "art_root_io/TFileService.h" 
+#include "art_root_io/TFileService.h"
 #include <TH1F.h>
 #include <TH2F.h>
 #include <TH1.h>
 #include <TProfile.h>
 
 //Offline:
-#include "ConditionsService/inc/AcceleratorParams.hh"
-#include "ConditionsService/inc/ConditionsHandle.hh"
 
 
 //C++:
@@ -56,7 +54,7 @@ namespace ots
 	    void beginRun(art::Run const&) override;
         void beginJob() override;
       private:
-	   
+
         enum {
             kNTrigInfo     = 40
         };
@@ -67,7 +65,7 @@ namespace ots
             TH1F *_hTrigBDW   [kNTrigInfo];
 
             summaryInfoHist_() {
-            for (int i=0; i<kNTrigInfo; ++i){ 
+            for (int i=0; i<kNTrigInfo; ++i){
             _hTrigInfo  [i] = NULL;
             _h2DTrigInfo[i] = NULL;
             _hTrigBDW   [i] = NULL;
@@ -78,18 +76,18 @@ namespace ots
         struct  trigInfo_ {
             int           counts;
             int           exclusive_counts;
-            std::string   label;             
+            std::string   label;
             trigInfo_ ():counts(0), exclusive_counts(0){}
         };
 
-        std::vector<trigInfo_>    _trigAll;	     
-        std::vector<trigInfo_>    _trigFinal;    
-        std::vector<trigInfo_>    _trigCaloOnly; 
+        std::vector<trigInfo_>    _trigAll;
+        std::vector<trigInfo_>    _trigFinal;
+        std::vector<trigInfo_>    _trigCaloOnly;
         std::vector<trigInfo_>    _trigCaloCalib;
-        std::vector<trigInfo_>    _trigTrack;    
-        std::vector<trigInfo_>    _trigHelix;    
-        std::vector<trigInfo_>    _trigEvtPS;  
-  
+        std::vector<trigInfo_>    _trigTrack;
+        std::vector<trigInfo_>    _trigHelix;
+        std::vector<trigInfo_>    _trigEvtPS;
+
         summaryInfoHist_ sumHist_;
 
         art::RunNumber_t current_run_;
@@ -98,13 +96,13 @@ namespace ots
         bool writeOutput_;
         bool doStreaming_;
         bool overwrite_mode_;
-        size_t _nMaxTrig;    
+        size_t _nMaxTrig;
         int _nTrackTrig;
         int _nCaloTrig;
         float _nProcess;
         double  _duty_cycle;
         void PlotRate(art::Event const& e);
-        
+
         void BookHistos();
         void BookTriggerHistos();
         void FillHistos();
@@ -127,13 +125,13 @@ ots::TriggerRates::TriggerRates(fhicl::ParameterSet const& pset)
     _duty_cycle    (pset.get<float> ("dutyCycle", 1.))
 {
 	TLOG_INFO("TriggerRates") << "TriggerRate Plotter construction is beginning " << TLOG_ENDL;
-    _trigAll.      resize(_nMaxTrig);	     
-    _trigFinal.    resize(_nMaxTrig);    
-    _trigCaloOnly. resize(_nMaxTrig); 
+    _trigAll.      resize(_nMaxTrig);
+    _trigFinal.    resize(_nMaxTrig);
+    _trigCaloOnly. resize(_nMaxTrig);
     _trigCaloCalib.resize(_nMaxTrig);
-    _trigTrack.    resize(_nMaxTrig);    
-    _trigHelix.    resize(_nMaxTrig);    
-    _trigEvtPS.    resize(_nMaxTrig); 
+    _trigTrack.    resize(_nMaxTrig);
+    _trigHelix.    resize(_nMaxTrig);
+    _trigEvtPS.    resize(_nMaxTrig);
 	TLOG_DEBUG("TriggerRates") << "TriggerRate Plotter construction complete" << TLOG_ENDL;
 }
 
@@ -159,28 +157,28 @@ void ots::TriggerRates::analyze(art::Event const& e)
   void ots::TriggerRates::BookHistos(){
     art::TFileDirectory trigInfoDir = tfs->mkdir("trigInfo");
 
-    sumHist_._hTrigInfo[0]   = trigInfoDir.make<TH1F>("hTrigInfo_global", "Global Trigger rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._hTrigInfo[1]   = trigInfoDir.make<TH1F>("hTrigInfo_track", "Calo-only Triggers rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._hTrigInfo[2]   = trigInfoDir.make<TH1F>("hTrigInfo_calo", "Track Triggers rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._hTrigInfo[3]   = trigInfoDir.make<TH1F>("hTrigInfo_evtPS", "Event prescaler Trigger bits distribution", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._hTrigInfo[4]   = trigInfoDir.make<TH1F>("hTrigInfo_helix", "HelixSeed Triggers rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._hTrigInfo[5]   = trigInfoDir.make<TH1F>("hTrigInfo_caloCalib", "Calo Calibration rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._hTrigInfo[6]   = trigInfoDir.make<TH1F>("hTrigInfo_final"     , "Global Trigger rejection of the paths"      , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
+    sumHist_._hTrigInfo[0]   = trigInfoDir.make<TH1F>("hTrigInfo_global", "Global Trigger rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._hTrigInfo[1]   = trigInfoDir.make<TH1F>("hTrigInfo_track", "Calo-only Triggers rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._hTrigInfo[2]   = trigInfoDir.make<TH1F>("hTrigInfo_calo", "Track Triggers rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._hTrigInfo[3]   = trigInfoDir.make<TH1F>("hTrigInfo_evtPS", "Event prescaler Trigger bits distribution", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._hTrigInfo[4]   = trigInfoDir.make<TH1F>("hTrigInfo_helix", "HelixSeed Triggers rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._hTrigInfo[5]   = trigInfoDir.make<TH1F>("hTrigInfo_caloCalib", "Calo Calibration rejection", (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._hTrigInfo[6]   = trigInfoDir.make<TH1F>("hTrigInfo_final"     , "Global Trigger rejection of the paths"      , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
 
-    sumHist_._hTrigInfo[10]  = trigInfoDir.make<TH1F>("hTrigInfo_unique_all", "Events found only by each Trig path"        , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._hTrigInfo[11]  = trigInfoDir.make<TH1F>("hTrigInfo_unique"    , "Events found only by each Trig path"        , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
+    sumHist_._hTrigInfo[10]  = trigInfoDir.make<TH1F>("hTrigInfo_unique_all", "Events found only by each Trig path"        , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._hTrigInfo[11]  = trigInfoDir.make<TH1F>("hTrigInfo_unique"    , "Events found only by each Trig path"        , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
 
-    sumHist_._hTrigInfo[15]  = trigInfoDir.make<TH1F>("hTrigInfo_paths"     , "Rejection of all the Trigger paths"         , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
+    sumHist_._hTrigInfo[15]  = trigInfoDir.make<TH1F>("hTrigInfo_paths"     , "Rejection of all the Trigger paths"         , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
 
 
-    sumHist_._h2DTrigInfo[0] = trigInfoDir.make<TH2F>("h2DTrigInfo_map_all" , "Trigger correlation map from all filters"   , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5), (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._h2DTrigInfo[1] = trigInfoDir.make<TH2F>("h2DTrigInfo_map"     , "Trigger correlation map"                    , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5), (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));   
+    sumHist_._h2DTrigInfo[0] = trigInfoDir.make<TH2F>("h2DTrigInfo_map_all" , "Trigger correlation map from all filters"   , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5), (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._h2DTrigInfo[1] = trigInfoDir.make<TH2F>("h2DTrigInfo_map"     , "Trigger correlation map"                    , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5), (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
 
     art::TFileDirectory trigBDWDir = tfs->mkdir("trigBDW");
 
-    sumHist_._hTrigBDW[0]   = trigBDWDir.make<TH1F>("hTrigBDW_global"    , "Trigger bandwidth; ; rate [Hz]"                   , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    sumHist_._hTrigBDW[1]   = trigBDWDir.make<TH1F>("hTrigBDW_cumulative", "Cumulative Trigger bandwidth; ; rate [Hz]"        , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));       
-    
+    sumHist_._hTrigBDW[0]   = trigBDWDir.make<TH1F>("hTrigBDW_global"    , "Trigger bandwidth; ; rate [Hz]"                   , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+    sumHist_._hTrigBDW[1]   = trigBDWDir.make<TH1F>("hTrigBDW_cumulative", "Cumulative Trigger bandwidth; ; rate [Hz]"        , (_nMaxTrig+2), -0.5, (_nMaxTrig+1.5));
+
   }
 
 
@@ -203,7 +201,7 @@ void ots::TriggerRates::FillHistos(){
 
       sumHist_._hTrigInfo[1]->GetXaxis()->SetBinLabel(i+1, _trigTrack[i].label.c_str());
       if (_trigTrack[i].counts > 0) sumHist_._hTrigInfo[1]->SetBinContent(i+1, _nProcess/_trigTrack[i].counts);
-      
+
       sumHist_._hTrigInfo[2]->GetXaxis()->SetBinLabel(i+1, _trigCaloOnly[i].label.c_str());
       if (_trigCaloOnly[i].counts > 0) sumHist_._hTrigInfo[2]->SetBinContent(i+1, _nProcess/_trigCaloOnly[i].counts);
 
@@ -271,25 +269,25 @@ void ots::TriggerRates::FillHistos(){
       }
     ++index_x;
     }
-    
+
     evalTriggerRate();
-    //WRITE ROOT FILE 
+    //WRITE ROOT FILE
     //if(writeOutput_)    tfs->write(); //tfs = art TFileService
     //STREAM - another handle, do stream ing as parameter - stream histograms
     //if (doStreaming_){ rootNetClient->write(); }
   }
 
 void   ots::TriggerRates::evalTriggerRate(){
-    
+
     std::sort(_trigFinal.begin(), _trigFinal.end(), [](const auto a, const auto b) {return a.counts < b.counts; });
-    
+
     mu2e::ConditionsHandle<mu2e::AcceleratorParams> accPar("ignored");
     double    mbtime         = accPar->deBuncherPeriod;
     double    mean_mb_rate   = 1./(mbtime)*_duty_cycle;
 
     bool      isFirst(true);
     int       index(0);
-   
+
     std::vector<std::string>    labels_by_rate;
 
     for (size_t i=0; i< _trigFinal.size(); ++i){

@@ -38,8 +38,6 @@ but has been adapted for Online vicualization.
 #include "art_root_io/TFileService.h"
 
 //Offline:
-#include <ConditionsService/inc/AcceleratorParams.hh>
-#include <ConditionsService/inc/ConditionsHandle.hh>
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Wtype-limits"
 #pragma GCC diagnostic ignored "-Wpedantic"
