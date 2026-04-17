@@ -221,8 +221,13 @@ class CaloDigiDQM : public art::EDAnalyzer
 	static constexpr int kChannelsPerBoard = 20;
 	static constexpr int kChannelsPerDisk  = kBoardsPerDisk * kChannelsPerBoard;
 
-	static constexpr int kTotalBoards   = kNDisks * kBoardsPerDisk;    // 160
-	static constexpr int kTotalChannels = kNDisks * kChannelsPerDisk;  // 3200
+	static constexpr int kLaserBoardID  = 160;
+	static constexpr int kLaserChannels = kChannelsPerBoard;
+
+	static constexpr int kTotalBoards       = kNDisks * kBoardsPerDisk;    // 160
+	static constexpr int kTotalChannels     = kNDisks * kChannelsPerDisk;  // 3200
+	static constexpr int kSparseStride      = 100;
+	static constexpr int kMaxEncodedBoardID = kLaserBoardID;  // include board 160
 
 	// First board ID for a given disk in the global board ID space
 	static int boardMinForDisk(int disk) { return disk * kBoardsPerDisk; }
@@ -234,7 +239,10 @@ class CaloDigiDQM : public art::EDAnalyzer
 		return (boardID - bmin) * kChannelsPerBoard + chanID;
 	}
 
-	static int encodeSparse(int boardID, int chanID) { return boardID * 100 + chanID; }
+	static int encodeSparse(int boardID, int chanID)
+	{
+		return boardID * kSparseStride + chanID;
+	}
 
 	static int encodeDense(int boardID, int chanID)
 	{
@@ -250,12 +258,17 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 	static EncodedAxisConfig axisSparseGlobal()
 	{
-		return EncodedAxisConfig{15920, 0.0, 15920.0};
+		return EncodedAxisConfig{
+		    kMaxEncodedBoardID * kSparseStride + kChannelsPerBoard,
+		    0.0,
+		    double(kMaxEncodedBoardID * kSparseStride + kChannelsPerBoard)};
 	}
 
 	static EncodedAxisConfig axisDenseGlobal()
 	{
-		return EncodedAxisConfig{kTotalChannels, 0.0, (double)kTotalChannels};
+		return EncodedAxisConfig{(kMaxEncodedBoardID + 1) * kChannelsPerBoard,
+		                         0.0,
+		                         double((kMaxEncodedBoardID + 1) * kChannelsPerBoard)};
 	}
 
 	// Flatten disk and board ID into a compact board index for arrays
@@ -576,9 +589,6 @@ class CaloDigiDQM : public art::EDAnalyzer
 		TProfile* max{nullptr};
 	};
 
-	static constexpr int kLaserBoardID  = 160;
-	static constexpr int kLaserChannels = kChannelsPerBoard;
-
 	static bool isLaserBoard(int boardID) { return boardID == kLaserBoardID; }
 
 	void ensureLaserBoardBooked();
@@ -586,17 +596,18 @@ class CaloDigiDQM : public art::EDAnalyzer
 	void ensureLaserRmsDistBooked(int chanID);
 	void ensureLaserMaxDistBooked(int chanID);
 	void ensureLaserLiveWaveformBooked(int chanID, int rawId, int sipmId);
-	void ensureLaserFirstHitBooked(int         chanID,
-	                               int         rawId,
-	                               int         sipmId,
-	                               auto const& waveform,
-	                               int         wfSize,
-	                               float       baseline);
-
-	static bool computeBaselineRms(auto const& waveform,
-	                               int         wfSize,
-	                               float&      baseline,
-	                               float&      rms)
+	template<class WaveformT>
+	void ensureLaserFirstHitBooked(int              chanID,
+	                               int              rawId,
+	                               int              sipmId,
+	                               WaveformT const& waveform,
+	                               int              wfSize,
+	                               float            baseline);
+	template<class WaveformT>
+	static bool computeBaselineRms(WaveformT const& waveform,
+	                               int              wfSize,
+	                               float&           baseline,
+	                               float&           rms)
 	{
 		if(wfSize <= 0)
 			return false;
@@ -765,14 +776,15 @@ class CaloDigiDQM : public art::EDAnalyzer
 	void ensureBoardBooked(int disk, int boardID);
 	void ensureLiveWaveformBooked(
 	    int disk, int boardID, int chanID, int rawId, int sipmId);
-	void ensureFirstHitBooked(int         disk,
-	                          int         boardID,
-	                          int         chanID,
-	                          int         rawId,
-	                          int         sipmId,
-	                          auto const& waveform,
-	                          int         wfSize,
-	                          float       baseline);
+	template<class WaveformT>
+	void ensureFirstHitBooked(int              disk,
+	                          int              boardID,
+	                          int              chanID,
+	                          int              rawId,
+	                          int              sipmId,
+	                          WaveformT const& waveform,
+	                          int              wfSize,
+	                          float            baseline);
 };
 
 void CaloDigiDQM::ensureBaselineDistBooked(int disk, int boardID, int chanID)
@@ -1036,8 +1048,13 @@ void CaloDigiDQM::ensureLaserLiveWaveformBooked(int chanID, int rawId, int sipmI
 	laserLiveWf_[(size_t)chanID]->GetXaxis()->SetTitle("Tick");
 }
 
-void CaloDigiDQM::ensureLaserFirstHitBooked(
-    int chanID, int rawId, int sipmId, auto const& waveform, int wfSize, float baseline)
+template<class WaveformT>
+void CaloDigiDQM::ensureLaserFirstHitBooked(int              chanID,
+                                            int              rawId,
+                                            int              sipmId,
+                                            WaveformT const& waveform,
+                                            int              wfSize,
+                                            float            baseline)
 {
 	if(chanID < 0 || chanID >= kLaserChannels)
 		return;
@@ -1177,14 +1194,15 @@ void CaloDigiDQM::ensureLiveWaveformBooked(
 	liveWf_[(size_t)cidx]->GetXaxis()->SetTitle("Tick");
 }
 
-void CaloDigiDQM::ensureFirstHitBooked(int         disk,
-                                       int         boardID,
-                                       int         chanID,
-                                       int         rawId,
-                                       int         sipmId,
-                                       auto const& waveform,
-                                       int         wfSize,
-                                       float       baseline)
+template<class WaveformT>
+void CaloDigiDQM::ensureFirstHitBooked(int              disk,
+                                       int              boardID,
+                                       int              chanID,
+                                       int              rawId,
+                                       int              sipmId,
+                                       WaveformT const& waveform,
+                                       int              wfSize,
+                                       float            baseline)
 {
 	// Capture the first observed waveform per channel for offline inspection and density plots
 	const int cidx = channelIndex(disk, boardID, chanID);
@@ -1448,8 +1466,16 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	for(int i = 0; i < (int)SkipReason::Count; ++i)
 		h_skip_reason_->GetXaxis()->SetBinLabel(i + 1, skipLabel((SkipReason)i));
 
-	h_global_board_vs_channel_ = globalDir_->make<TH2I>(
-	    "h_board_vs_channel", "Board vs Channel Occupancy", 161, 0, 161, 20, 0, 20);
+	h_global_board_vs_channel_ =
+	    globalDir_->make<TH2I>("h_board_vs_channel",
+	                           "Board vs Channel Occupancy (All Disks + Laser)",
+	                           161,
+	                           0,
+	                           161,
+	                           20,
+	                           0,
+	                           20);
+
 	h_global_board_vs_channel_->GetXaxis()->SetTitle("Board ID");
 	h_global_board_vs_channel_->GetYaxis()->SetTitle("Channel ID");
 
@@ -1488,19 +1514,21 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	auto axisSparse = axisSparseGlobal();
 	auto axisDense  = axisDenseGlobal();
 
-	h_occupancy_sparse_ = globalDir_->make<TH1F>("h_occ_sparse",
-	                                             "Occupancy (Sparse Encoding, All Disks)",
-	                                             axisSparse.nBins,
-	                                             axisSparse.xMin,
-	                                             axisSparse.xMax);
+	h_occupancy_sparse_ =
+	    globalDir_->make<TH1F>("h_occ_sparse",
+	                           "Occupancy (Sparse Encoding, All Disks + Laser)",
+	                           axisSparse.nBins,
+	                           axisSparse.xMin,
+	                           axisSparse.xMax);
 	h_occupancy_sparse_->GetXaxis()->SetTitle("Encoded Channel (boardID*100 + chanID)");
 	h_occupancy_sparse_->GetYaxis()->SetTitle("Hit Count");
 
-	h_occupancy_dense_ = globalDir_->make<TH1F>("h_occ_dense",
-	                                            "Occupancy (Dense Encoding, All Disks)",
-	                                            axisDense.nBins,
-	                                            axisDense.xMin,
-	                                            axisDense.xMax);
+	h_occupancy_dense_ =
+	    globalDir_->make<TH1F>("h_occ_dense",
+	                           "Occupancy (Dense Encoding, All Disks + Laser)",
+	                           axisDense.nBins,
+	                           axisDense.xMin,
+	                           axisDense.xMax);
 	h_occupancy_dense_->GetXaxis()->SetTitle("Encoded Channel (boardID*20 + chanID)");
 	h_occupancy_dense_->GetYaxis()->SetTitle("Hit Count");
 
@@ -1516,50 +1544,51 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 		return h;
 	};
 
-	h_baseline_sparse_ = makeGlobalProfile("h_base_sparse",
-	                                       "Baseline (Sparse Encoding, All Disks)",
-	                                       axisSparse,
-	                                       "Encoded Channel (boardID*100 + chanID)",
-	                                       "Mean Baseline [ADC]");
+	h_baseline_sparse_ =
+	    makeGlobalProfile("h_base_sparse",
+	                      "Baseline (Sparse Encoding, All Disks + Laser)",
+	                      axisSparse,
+	                      "Encoded Channel (boardID*100 + chanID)",
+	                      "Mean Baseline [ADC]");
 
 	h_baseline_dense_ = makeGlobalProfile("h_base_dense",
-	                                      "Baseline (Dense Encoding, All Disks)",
+	                                      "Baseline (Dense Encoding, All Disks + Laser)",
 	                                      axisDense,
 	                                      "Encoded Channel (boardID*20 + chanID)",
 	                                      "Mean Baseline [ADC]");
 
 	h_rms_sparse_ = makeGlobalProfile("h_rms_sparse",
-	                                  "RMS (Sparse Encoding, All Disks)",
+	                                  "RMS (Sparse Encoding, All Disks + Laser)",
 	                                  axisSparse,
 	                                  "Encoded Channel (boardID*100 + chanID)",
 	                                  "Mean RMS [ADC]");
 
 	h_rms_dense_ = makeGlobalProfile("h_rms_dense",
-	                                 "RMS (Dense Encoding, All Disks)",
+	                                 "RMS (Dense Encoding, All Disks + Laser)",
 	                                 axisDense,
 	                                 "Encoded Channel (boardID*20 + chanID)",
 	                                 "Mean RMS [ADC]");
 
 	h_amp_sparse_ = makeGlobalProfile("h_amp_sparse",
-	                                  "Amplitude (Sparse Encoding, All Disks)",
+	                                  "Amplitude (Sparse Encoding, All Disks + Laser)",
 	                                  axisSparse,
 	                                  "Encoded Channel (boardID*100 + chanID)",
 	                                  "Mean Amplitude [ADC]");
 
 	h_amp_dense_ = makeGlobalProfile("h_amp_dense",
-	                                 "Amplitude (Dense Encoding, All Disks)",
+	                                 "Amplitude (Dense Encoding, All Disks + Laser)",
 	                                 axisDense,
 	                                 "Encoded Channel (boardID*20 + chanID)",
 	                                 "Mean Amplitude [ADC]");
 
 	h_maxval_sparse_ = makeGlobalProfile("h_max_sparse",
-	                                     "Max ADC (Sparse Encoding, All Disks)",
+	                                     "Max ADC (Sparse Encoding, All Disks + Laser)",
 	                                     axisSparse,
 	                                     "Encoded Channel (boardID*100 + chanID)",
 	                                     "Mean Peak ADC [ADC]");
 
 	h_maxval_dense_ = makeGlobalProfile("h_max_dense",
-	                                    "Max ADC (Dense Encoding, All Disks)",
+	                                    "Max ADC (Dense Encoding, All Disks + Laser)",
 	                                    axisDense,
 	                                    "Encoded Channel (boardID*20 + chanID)",
 	                                    "Mean Peak ADC [ADC]");
@@ -1569,8 +1598,8 @@ CaloDigiDQM::CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config)
 	h_asymmetry->GetXaxis()->SetTitle("(L - R)/(L + R)");
 	h_asymmetry->GetYaxis()->SetTitle("Frequency");
 
-	h_global_board_dist_ =
-	    globalDir_->make<TH1F>("h_board_dist", "Global Board Distribution", 161, 0, 161);
+	h_global_board_dist_ = globalDir_->make<TH1F>(
+	    "h_board_dist", "Global Board Distribution (All Disks + Laser)", 161, 0, 161);
 	h_global_board_dist_->GetXaxis()->SetTitle("Board ID");
 	h_global_board_dist_->GetYaxis()->SetTitle("Frequency");
 }
@@ -1684,7 +1713,9 @@ void CaloDigiDQM::analyze(art::Event const& event)
 		{
 			++nFillLaser_;
 			ensureLaserBoardBooked();
-			laserBoardUpdated_ = true;
+			laserBoardUpdated_      = true;
+			const int encodedSparse = encodeSparse(boardID, chanID);
+			const int encodedDense  = encodeDense(boardID, chanID);
 
 			if(!laserChannelBooked_[(size_t)chanID])
 			{
@@ -1695,6 +1726,11 @@ void CaloDigiDQM::analyze(art::Event const& event)
 				laserChannelBooked_[(size_t)chanID] = 1u;
 				activeLaserChannels_.push_back(chanID);
 			}
+
+			if(h_occupancy_sparse_)
+				h_occupancy_sparse_->Fill(encodedSparse);
+			if(h_occupancy_dense_)
+				h_occupancy_dense_->Fill(encodedDense);
 
 			if(h_global_board_dist_)
 				h_global_board_dist_->Fill(boardID);
@@ -2031,7 +2067,9 @@ void CaloDigiDQM::analyze(art::Event const& event)
 
 	for(int chan : repLaserChannels)
 	{
-		const auto& f = laserRep[(size_t)chan];
+		const auto& f             = laserRep[(size_t)chan];
+		const int   encodedSparse = encodeSparse(kLaserBoardID, chan);
+		const int   encodedDense  = encodeDense(kLaserBoardID, chan);
 
 		if(laserBoardH_.base)
 			laserBoardH_.base->Fill(chan, f.baseline);
@@ -2039,6 +2077,29 @@ void CaloDigiDQM::analyze(art::Event const& event)
 			laserBoardH_.rms->Fill(chan, f.rms);
 		if(laserBoardH_.max)
 			laserBoardH_.max->Fill(chan, f.ampRaw);
+
+		// Occupancy counts all usable digis.
+		// Profile quantities use one representative digi per channel per event.
+
+		if(h_amp_sparse_)
+			h_amp_sparse_->Fill(encodedSparse, f.amp);
+		if(h_amp_dense_)
+			h_amp_dense_->Fill(encodedDense, f.amp);
+
+		if(h_baseline_sparse_)
+			h_baseline_sparse_->Fill(encodedSparse, f.baseline);
+		if(h_baseline_dense_)
+			h_baseline_dense_->Fill(encodedDense, f.baseline);
+
+		if(h_rms_sparse_)
+			h_rms_sparse_->Fill(encodedSparse, f.rms);
+		if(h_rms_dense_)
+			h_rms_dense_->Fill(encodedDense, f.rms);
+
+		if(h_maxval_sparse_)
+			h_maxval_sparse_->Fill(encodedSparse, f.ampRaw);
+		if(h_maxval_dense_)
+			h_maxval_dense_->Fill(encodedDense, f.ampRaw);
 
 		laserLastWf_[(size_t)chan]      = f.wfSub;
 		laserLastWfValid_[(size_t)chan] = 1u;
