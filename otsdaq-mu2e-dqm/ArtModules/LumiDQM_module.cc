@@ -34,7 +34,7 @@
 #include <cmath>
 
 // LumiAna includes
-#include "otsdaq-mu2e-dqm/ArtModules/RecoNPOT.hh" 
+#include "otsdaq-mu2e-dqm/ArtModules/RecoNPOT.hh"
 
 
 // ======================================================================
@@ -44,7 +44,7 @@ namespace mu2e {
 
   public:
 
-    
+
     enum class SubRunStatus {
       OK   = 0,
       WARN = 1,
@@ -114,6 +114,11 @@ namespace mu2e {
     void accumulateTrackerHits(const mu2e::IntensityInfoTrackerHits& info);
     void accumulateTimeClusters(const mu2e::IntensityInfoTimeCluster& info);
     void fillEventHeaders(std::vector<art::Handle<mu2e::EventHeaders>>& handles);
+    void analyze_data(std::vector<art::Handle <mu2e::IntensityInfosCalo>> caloHandles,
+                      std::vector<art::Handle <mu2e::IntensityInfosTrackerHits>> trkHandles,
+                      std::vector<art::Handle <mu2e::IntensityInfosTimeCluster>> tcHandles,
+                      std::vector<art::Handle <mu2e::EventHeaders>> headerHandles);
+
 
     SubRunStatus evaluateSubRunStatus(double avgPOT,
                                       double avgNCaloHits,
@@ -161,7 +166,7 @@ namespace mu2e {
     int                 _maxCaloHits;
     int                 _minTrackerHits;
     int                 _maxTrackerHits;
-    long unsigned int   _nEventsPerBin; 
+    long unsigned int   _nEventsPerBin;
 
 
     // ------------------------------------------------------------------
@@ -212,10 +217,10 @@ namespace mu2e {
         nEvents                 = 0 ;
       }
     };
-    
+
     SubRunAccumulator _acc;
 
-    
+
     // ------------------------------------------------------------------
     // Histograms
     // ------------------------------------------------------------------
@@ -277,7 +282,7 @@ namespace mu2e {
     int _averageEventIndex     = 1;
 
 
-  }; 
+  };
 
   // ======================================================================
   // Constructor
@@ -293,6 +298,9 @@ namespace mu2e {
     , _minTrackerHits            (config().minTrackerHits())
     , _maxTrackerHits            (config().maxTrackerHits())
     , _nEventsPerBin             (config().nEventsPerBin())
+      // , _subrunGraphIndex          (1)
+      // , _globalEventIndex          (0)
+      // , _averageEventIndex         (1)
   {
     _acc.reset(); // zero-initialize the accumulator
   }
@@ -317,16 +325,16 @@ namespace mu2e {
     //      Make the Histograms!
     //----------------------------------
     //-------Observable distributions (filled per event)------
-    _NCaloHits    = dirObs.make<TH1F>("hNCaloHits"   , "N(Calorimeter hits);N(hits);Events"    , 100, 0., 5000. );
-    _NCaloHitsD0  = dirObs.make<TH1F>("hNCaloHitsD0" , "N(Calo hits disk 0);N(hits);Events"    , 100, 0., 3000. );
-    _NCaloHitsD1  = dirObs.make<TH1F>("hNCaloHitsD1" , "N(Calo hits disk 1);N(hits);Events"    , 100, 0., 2000. );
-    _CaloEnergy   = dirObs.make<TH1F>("hCaloEnergy"  , "Calorimeter energy;Energy (MeV);Events", 100, 0., 12000.);
-    _NCaphriHits  = dirObs.make<TH1F>("hNCaphriHits" , "N(CAPHRI hits);N(hits);Events"         ,  30, 0., 30.   );
-    _NTrackerHits = dirObs.make<TH1F>("hNTrackerHits", "N(Tracker hits);N(hits);Events"        , 100, 0., 10000.);
-    _NProtonsDF   = dirObs.make<TH1F>("hNProtonsDF"  , "N(DF proton TCs);N(TCs);Events"        ,  40, 0., 40.   );
+    _NCaloHits    = dirObs.make<TH1F>("NCaloHits"   , "N(Calorimeter hits);N(hits);Events"    , 100, 0., 5000. );
+    _NCaloHitsD0  = dirObs.make<TH1F>("NCaloHitsD0" , "N(Calo hits disk 0);N(hits);Events"    , 100, 0., 3000. );
+    _NCaloHitsD1  = dirObs.make<TH1F>("NCaloHitsD1" , "N(Calo hits disk 1);N(hits);Events"    , 100, 0., 2000. );
+    _CaloEnergy   = dirObs.make<TH1F>("CaloEnergy"  , "Calorimeter energy;Energy (MeV);Events", 100, 0., 12000.);
+    _NCaphriHits  = dirObs.make<TH1F>("NCaphriHits" , "N(CAPHRI hits);N(hits);Events"         ,  30, 0., 30.   );
+    _NTrackerHits = dirObs.make<TH1F>("NTrackerHits", "N(Tracker hits);N(hits);Events"        , 100, 0., 10000.);
+    _NProtonsDF   = dirObs.make<TH1F>("NProtonsDF"  , "N(DF proton TCs);N(TCs);Events"        ,  40, 0., 40.   );
 
     //------RecoNPOT distributions (filled per event)--------
-    _RecoNPOT_primary     = dirReco.make<TH1F>("RecoNPOT_primary"    , "Primary recoNPOT [avg(trkHits,caloD1)];N(POT);Events", 100, 0., maxPOT);
+    _RecoNPOT_primary     = dirReco.make<TH1F>("RecoNPOT_primary"    , "Primary recoNPOT [avg(trkHits,caloD1)];N(POT);Events", 100, 0. , 80e6 );// maxPOT);
     _RecoNPOT_trackerHits = dirReco.make<TH1F>("RecoNPOT_trackerHits", "RecoNPOT from tracker hits;N(POT);Events"             , 100, 0., maxPOT);
     _RecoNPOT_caloEnergy  = dirReco.make<TH1F>("RecoNPOT_caloEnergy" , "RecoNPOT from calo energy;N(POT);Events"              , 100, 0., maxPOT);
     _RecoNPOT_caloHits    = dirReco.make<TH1F>("RecoNPOT_caloHits"   , "RecoNPOT from total calo hits;N(POT);Events"          , 100, 0., maxPOT);
@@ -410,7 +418,7 @@ namespace mu2e {
     _RecoNPOT_caloHitsD1 ->Fill(recoNPOT_caloD1);
     _RecoNPOT_caphriHits ->Fill(recoNPOT_caphri);
 
-    
+
     //-------Add to the accumulated sum to average over the subrun-----
     _acc.sumNCaloHits           += nCaloHits;
     _acc.sumNCaloHitsD0         += nCaloHitsD0;
@@ -431,7 +439,7 @@ namespace mu2e {
     _avg.AsumNCaphriHits         += nCaphri;
     _avg.AsumRecoNPOT_caloHitsD1 += recoNPOT_caloD1;
     _avg.AsumRecoNPOT_primary    += recoNPOT_caloD1;
-    
+
   }
 
   // ======================================================================
@@ -456,7 +464,7 @@ namespace mu2e {
     _avg.AsumNTrackerHits         += nTrkHits;
     _avg.AsumRecoNPOT_trackerHits += recoNPOT_trkHits;
     _avg.AsumRecoNPOT_primary     += recoNPOT_trkHits;
-    
+
   }
 
   // ======================================================================
@@ -468,15 +476,15 @@ namespace mu2e {
     const double recoNPOT_nProtonsDF = RecoNPOT::POTfromDFTCs(nProtons);
 
     //-----Fill histograms and add to running sums-----
-   
+
     _NProtonsDF                 ->Fill(nProtons);
     _RecoNPOT_nProtonsDF        ->Fill(recoNPOT_nProtonsDF);
-    
+
     _acc.sumNProtonsDF          += nProtons;
     _acc.sumRecoNPOT_nProtonsDF += recoNPOT_nProtonsDF;
 
     //-----Add to the average accumulating to average over events------
-    _avg.AsumNProtonsDF          += nProtons;    
+    _avg.AsumNProtonsDF          += nProtons;
 
 
   }
@@ -526,8 +534,27 @@ namespace mu2e {
   // ======================================================================
   void LumiDQM::analyze(const art::Event& event)  {
     //All intensity info products are stored at SubRun level therefore per-event processing happens in endSubRun()
+
+    // Get many --> call analysis function passing all handles
+
+    auto caloHandles   = event.getMany<mu2e::IntensityInfosCalo>();
+    auto trkHandles    = event.getMany<mu2e::IntensityInfosTrackerHits>();
+    auto tcHandles     = event.getMany<mu2e::IntensityInfosTimeCluster>();
+    auto headerHandles = event.getMany<mu2e::EventHeaders>();
+
+    if(_diagLevel > 1) {
+      std::cout << "LumiDQM::" << __func__
+                << ": Event " << event.id()
+                << " -- retrieved " << caloHandles.size()   << " calo handles"
+                << ", "             << trkHandles.size()    << " tracker handles"
+                << ", "             << tcHandles.size()     << " TC handles"
+                << ", "             << headerHandles.size() << " header handles\n";
+    }
+
+    // call analysis
+    analyze_data(caloHandles, trkHandles, tcHandles, headerHandles);
   }
-  
+
 
   // ======================================================================
   // endSubRun
@@ -537,14 +564,13 @@ namespace mu2e {
     const art::SubRunNumber_t subrunNum = sr.subRun();
     const art::RunNumber_t    runNum    = sr.run();
 
-    size_t nEntries = 0;
 
     auto caloHandles   = sr.getMany<mu2e::IntensityInfosCalo>();
     auto trkHandles    = sr.getMany<mu2e::IntensityInfosTrackerHits>();
     auto tcHandles     = sr.getMany<mu2e::IntensityInfosTimeCluster>();
     auto headerHandles = sr.getMany<mu2e::EventHeaders>();
 
-   
+
     if(_diagLevel > 0) {
       std::cout << "LumiDQM::" << __func__
                 << ": SubRun " << runNum << ":" << subrunNum
@@ -554,7 +580,86 @@ namespace mu2e {
                 << ", "             << headerHandles.size() << " header handles\n";
     }
 
-   
+    analyze_data(caloHandles, trkHandles, tcHandles, headerHandles);
+
+    // compute subrun averages (divide summed recoNPOT by the number of events)
+    const double n = (_acc.nEvents > 0) ? static_cast<double>(_acc.nEvents) : 1.0;
+
+    const double avgRecoNPOT_trackerHits = _acc.sumRecoNPOT_trackerHits / n;
+    const double avgRecoNPOT_caloD1      = _acc.sumRecoNPOT_caloHitsD1  / n;
+    const double avgRecoNPOT_primary     = (avgRecoNPOT_trackerHits + avgRecoNPOT_caloD1) / 2.0;
+
+    const double avgNCaloHitsD1_         = _acc.sumNCaloHitsD1  / n;
+    const double avgNTrackerHits_        = _acc.sumNTrackerHits / n;
+
+    const double estimatorDiff_          = avgRecoNPOT_trackerHits - avgRecoNPOT_caloD1;
+
+    const double avgNCaloHits_           = _acc.sumNCaloHits    / n;
+    const SubRunStatus status = evaluateSubRunStatus(avgRecoNPOT_primary, avgNCaloHits_, avgNTrackerHits_, estimatorDiff_);
+
+    _SubRunStatus             ->SetBinContent(_subrunGraphIndex, static_cast<int>(status));
+    _AvgRecoNPOT_perSubRun    ->SetBinContent(_subrunGraphIndex, avgRecoNPOT_primary);
+    _NEvents_perSubRun        ->SetBinContent(_subrunGraphIndex, static_cast<double>(_acc.nEvents));
+
+    _AvgRecoNPOT_vs_subrun          ->AddPoint(_subrunGraphIndex, avgRecoNPOT_primary);
+    _AvgReco_NTrackerHits_vs_subrun ->AddPoint(_subrunGraphIndex, avgRecoNPOT_trackerHits);
+    _AvgReco_NCaloHitsD1_vs_subrun  ->AddPoint(_subrunGraphIndex, avgRecoNPOT_caloD1);
+    _AvgNTrackerHits_vs_subrun      ->AddPoint(_subrunGraphIndex, avgNTrackerHits_);
+    _AvgNCaloHitsD1_vs_subrun       ->AddPoint(_subrunGraphIndex, avgNCaloHitsD1_);
+    _EstimatorDiff_vs_subrun        ->AddPoint(_subrunGraphIndex, std::abs(estimatorDiff_));
+    _SubRunStatus_vs_subrun         ->AddPoint(_subrunGraphIndex, static_cast<double>(status));
+    // formatted summary printout
+    std::cout << "\n";
+    std::cout << "===================================================\n";
+    std::cout << "  LumiDQM SubRun Summary: Run " << runNum << " SubRun " << subrunNum << "\n";
+    std::cout << "  Events processed        : " << _acc.nEvents             << "\n";
+    std::cout << "  -- Primary estimator -----------------------------------\n";
+    std::cout << "  Avg recoNPOT [primary]  : " << avgRecoNPOT_primary      << "\n";
+    std::cout << "  Avg recoNPOT [trkHits]  : " << avgRecoNPOT_trackerHits  << "\n";
+    std::cout << "  Avg recoNPOT [caloD1]   : " << avgRecoNPOT_caloD1       << "\n";
+    std::cout << "  Estimator diff (trk-D1) : " << estimatorDiff_            << "\n";
+    std::cout << "  -- Detector observables --------------------------------\n";
+    std::cout << "  Avg N(calo hits in D1)  : " << avgNCaloHitsD1_          << "\n";
+    std::cout << "  Avg N(calo hits D0)     : " << _acc.sumNCaloHitsD0 / n  << "\n";
+    std::cout << "  Avg N(calo hits)        : " << avgNCaloHits_            << "\n";
+    std::cout << "  Avg calo energy (MeV)   : " << _acc.sumCaloEnergy  / n  << "\n";
+    std::cout << "  Avg N(tracker hits)     : " << avgNTrackerHits_         << "\n";
+    std::cout << "  Avg N(CAPHRI hits)      : " << _acc.sumNCaphriHits / n  << "\n";
+    std::cout << "  Avg N(DF proton TCs)    : " << _acc.sumNProtonsDF  / n  << "\n";
+    std::cout << "  -- DQM Status ------------------------------------------\n";
+    std::cout << "  STATUS                  : " << statusString(status)      << "\n";
+
+    if(status != SubRunStatus::OK) {
+      std::cout << "  Triggered checks:\n";
+      if(avgRecoNPOT_primary     < _minPOTthreshold  ) std::cout << "    [FLAG] avg recoNPOT below minPOTthreshold (" << _minPOTthreshold << ")\n";
+      if(avgNCaloHits_            < _minCaloHits     ) std::cout << "    [FLAG] avg nCaloHits below minCaloHits (" << _minCaloHits << ")\n";
+      if(avgNTrackerHits_         < _minTrackerHits  ) std::cout << "    [FLAG] avg nTrackerHits below minTrackerHits (" << _minTrackerHits << ")\n";
+      if(avgRecoNPOT_primary     > _maxPOTthreshold  ) std::cout << "    [WARN] avg recoNPOT above maxPOTthreshold (" << _maxPOTthreshold << ")\n";
+      if(avgNCaloHits_           > _maxCaloHits      ) std::cout << "    [WARN] avg nCaloHits above maxCaloHits (" << _maxCaloHits << ")\n";
+      if(avgNTrackerHits_         > _maxTrackerHits  ) std::cout << "    [WARN] avg nTrackerHits above maxTrackerHits (" << _maxTrackerHits << ")\n";
+      if(std::abs(estimatorDiff_) > _maxEstimatorDiff) std::cout << "    [WARN] estimator diff above maxEstimatorDiff (" << _maxEstimatorDiff << ")\n";
+    }
+    std::cout << "===================================================\n\n";
+
+    if(_diagLevel > 1) {
+      std::cout << "  Total counts by object type:\n";
+      for(const auto& entry : _counter_by_object) {
+        std::cout << "    " << entry.first << " : " << entry.second << "\n";
+      }
+    }
+
+    _acc.reset();
+    _subrunGraphIndex++;
+
+  }
+
+  //Analyze data function
+  void LumiDQM::analyze_data(std::vector<art::Handle <mu2e::IntensityInfosCalo>> caloHandles,
+                             std::vector<art::Handle <mu2e::IntensityInfosTrackerHits>> trkHandles,
+                             std::vector<art::Handle <mu2e::IntensityInfosTimeCluster>> tcHandles,
+                             std::vector<art::Handle <mu2e::EventHeaders>> headerHandles) {
+    // Call analyze function, passing all handles
+
     if(!caloHandles.empty()  && caloHandles[0].isValid() &&
        !trkHandles.empty()   && trkHandles[0].isValid()  &&
        !tcHandles.empty()    && tcHandles[0].isValid()) {
@@ -562,10 +667,10 @@ namespace mu2e {
       const auto& caloVec = *caloHandles[0];
       const auto& trkVec  = *trkHandles[0];
       const auto& tcVec   = *tcHandles[0];
-      nEntries = std::min({caloVec.size(), trkVec.size(), tcVec.size()});
+      const size_t nEntries = std::min({caloVec.size(), trkVec.size(), tcVec.size()});
 
       for(size_t i = 0; i < nEntries; ++i) {
-        
+
         accumulateCalo        (caloVec[i]);
         accumulateTrackerHits (trkVec[i]);
         accumulateTimeClusters(tcVec[i]);
@@ -623,77 +728,8 @@ namespace mu2e {
       }
     }
     fillEventHeaders(headerHandles);
-    // compute subrun averages (divide summed recoNPOT by the number of events)
-    
-    const double n = (_acc.nEvents > 0) ? static_cast<double>(_acc.nEvents) : 1.0;    
-
-    const double avgRecoNPOT_trackerHits = _acc.sumRecoNPOT_trackerHits / n;
-    const double avgRecoNPOT_caloD1      = _acc.sumRecoNPOT_caloHitsD1  / n;
-    const double avgRecoNPOT_primary     = (avgRecoNPOT_trackerHits + avgRecoNPOT_caloD1) / 2.0;
-
-    const double avgNCaloHitsD1_         = _acc.sumNCaloHitsD1  / n;
-    const double avgNTrackerHits_        = _acc.sumNTrackerHits / n;
-   
-    const double estimatorDiff_          = avgRecoNPOT_trackerHits - avgRecoNPOT_caloD1;
-
-    const double avgNCaloHits_           = _acc.sumNCaloHits    / n;
-    const SubRunStatus status = evaluateSubRunStatus(avgRecoNPOT_primary, avgNCaloHits_, avgNTrackerHits_, estimatorDiff_); 
-   
-    _SubRunStatus             ->SetBinContent(_subrunGraphIndex, static_cast<int>(status));
-    _AvgRecoNPOT_perSubRun    ->SetBinContent(_subrunGraphIndex, avgRecoNPOT_primary);
-    _NEvents_perSubRun        ->SetBinContent(_subrunGraphIndex, static_cast<double>(_acc.nEvents));
-
-    _AvgRecoNPOT_vs_subrun          ->AddPoint(_subrunGraphIndex, avgRecoNPOT_primary);
-    _AvgReco_NTrackerHits_vs_subrun ->AddPoint(_subrunGraphIndex, avgRecoNPOT_trackerHits);
-    _AvgReco_NCaloHitsD1_vs_subrun  ->AddPoint(_subrunGraphIndex, avgRecoNPOT_caloD1);
-    _AvgNTrackerHits_vs_subrun      ->AddPoint(_subrunGraphIndex, avgNTrackerHits_);
-    _AvgNCaloHitsD1_vs_subrun       ->AddPoint(_subrunGraphIndex, avgNCaloHitsD1_);
-    _EstimatorDiff_vs_subrun        ->AddPoint(_subrunGraphIndex, std::abs(estimatorDiff_));
-    _SubRunStatus_vs_subrun         ->AddPoint(_subrunGraphIndex, static_cast<double>(status));
-    // formatted summary printout
-    std::cout << "\n";
-    std::cout << "===================================================\n";
-    std::cout << "  LumiDQM SubRun Summary: Run " << runNum << " SubRun " << subrunNum << "\n";
-    std::cout << "  Events processed        : " << _acc.nEvents             << "\n";
-    std::cout << "  -- Primary estimator -----------------------------------\n";
-    std::cout << "  Avg recoNPOT [primary]  : " << avgRecoNPOT_primary      << "\n";
-    std::cout << "  Avg recoNPOT [trkHits]  : " << avgRecoNPOT_trackerHits  << "\n";
-    std::cout << "  Avg recoNPOT [caloD1]   : " << avgRecoNPOT_caloD1       << "\n";
-    std::cout << "  Estimator diff (trk-D1) : " << estimatorDiff_            << "\n";
-    std::cout << "  -- Detector observables --------------------------------\n";
-    std::cout << "  Avg N(calo hits in D1)  : " << avgNCaloHitsD1_          << "\n";
-    std::cout << "  Avg N(calo hits D0)     : " << _acc.sumNCaloHitsD0 / n  << "\n";
-    std::cout << "  Avg N(calo hits)        : " << avgNCaloHits_            << "\n";
-    std::cout << "  Avg calo energy (MeV)   : " << _acc.sumCaloEnergy  / n  << "\n";
-    std::cout << "  Avg N(tracker hits)     : " << avgNTrackerHits_         << "\n";
-    std::cout << "  Avg N(CAPHRI hits)      : " << _acc.sumNCaphriHits / n  << "\n";
-    std::cout << "  Avg N(DF proton TCs)    : " << _acc.sumNProtonsDF  / n  << "\n";
-    std::cout << "  -- DQM Status ------------------------------------------\n";
-    std::cout << "  STATUS                  : " << statusString(status)      << "\n";
-
-    if(status != SubRunStatus::OK) {
-      std::cout << "  Triggered checks:\n";
-      if(avgRecoNPOT_primary     < _minPOTthreshold  ) std::cout << "    [FLAG] avg recoNPOT below minPOTthreshold (" << _minPOTthreshold << ")\n";
-      if(avgNCaloHits_            < _minCaloHits     ) std::cout << "    [FLAG] avg nCaloHits below minCaloHits (" << _minCaloHits << ")\n";
-      if(avgNTrackerHits_         < _minTrackerHits  ) std::cout << "    [FLAG] avg nTrackerHits below minTrackerHits (" << _minTrackerHits << ")\n";
-      if(avgRecoNPOT_primary     > _maxPOTthreshold  ) std::cout << "    [WARN] avg recoNPOT above maxPOTthreshold (" << _maxPOTthreshold << ")\n";
-      if(avgNCaloHits_           > _maxCaloHits      ) std::cout << "    [WARN] avg nCaloHits above maxCaloHits (" << _maxCaloHits << ")\n";
-      if(avgNTrackerHits_         > _maxTrackerHits  ) std::cout << "    [WARN] avg nTrackerHits above maxTrackerHits (" << _maxTrackerHits << ")\n";
-      if(std::abs(estimatorDiff_) > _maxEstimatorDiff) std::cout << "    [WARN] estimator diff above maxEstimatorDiff (" << _maxEstimatorDiff << ")\n";
-    }
-    std::cout << "===================================================\n\n";
-
-    if(_diagLevel > 1) {
-      std::cout << "  Total counts by object type:\n";
-      for(const auto& entry : _counter_by_object) {
-        std::cout << "    " << entry.first << " : " << entry.second << "\n";
-      }
-    }
-
-    _acc.reset();
-    _subrunGraphIndex++;
   }
- 
+
 } // end namespace mu2e
 
 DEFINE_ART_MODULE(mu2e::LumiDQM)

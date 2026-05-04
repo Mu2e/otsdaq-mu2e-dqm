@@ -1,5 +1,5 @@
-#ifndef __LUMIANA__RECONPOT__
-#define __LUMIANA__RECONPOT__
+#ifndef __MU2EDQM__RECONPOT__
+#define __MU2EDQM__RECONPOT__
 
 ///////////////////////////////////////////////////////////////////////////////
 // Estimate N(POT) from observables
