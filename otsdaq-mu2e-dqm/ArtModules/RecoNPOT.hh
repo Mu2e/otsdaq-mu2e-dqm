@@ -39,7 +39,7 @@ namespace mu2e {
   // predict nPOT from CaloEnergy Observable
   unsigned long long RecoNPOT::POTfromCaloEnergy(const double caloEnergy){
     unsigned long long POT(0);
-   
+
     if (caloEnergy >= 0.) {
       POT = 679158. + 12713.9*std::pow(caloEnergy,1) + 0.250061*std::pow(caloEnergy,2) + 3.70049e-06 *std::pow(caloEnergy,3) ;
     }
@@ -48,7 +48,7 @@ namespace mu2e {
 
   unsigned long long RecoNPOT::POTfromTrackerHits(const int trackerHits){
     unsigned long long POT(0);
-    if (trackerHits >= 0.) { 
+    if (trackerHits >= 0.) {
       POT = 2.88904e+06 + 12964.3*std::pow(trackerHits,1) +  0.629889*std::pow(trackerHits,2) +  -2.3262e-05 *std::pow(trackerHits,3) ;
     }
     return POT;
@@ -86,14 +86,14 @@ namespace mu2e {
 
   unsigned long long RecoNPOT::POTfromCAPHRI(const int nCPHRhits){
     unsigned long long POT(0);
-   
+
     if (nCPHRhits >= 0.) {
       POT = 1.51551e+07 + 3.93948e+06*std::pow(nCPHRhits,1) + 552745*std::pow(nCPHRhits,2) + -16288.1*std::pow(nCPHRhits,3) ;
     }
     return POT;
   }
 
-  
+
   unsigned long long RecoNPOT::POTfromnHitsD0(const int ncaloD0){
     unsigned long long POT(0);
     if (ncaloD0 >= 0. ){
@@ -104,7 +104,7 @@ namespace mu2e {
 
   unsigned long long RecoNPOT::POTfromnHitsD1(const int ncaloD1){
     unsigned long long POT(0);
-   
+
     if (ncaloD1 >= 0.) {
       POT =1.02265e+06 + 81212.6*std::pow(ncaloD1,1) +7.81749*std::pow(ncaloD1,2) + 0.00396047*std::pow(ncaloD1,3) ;
     }
