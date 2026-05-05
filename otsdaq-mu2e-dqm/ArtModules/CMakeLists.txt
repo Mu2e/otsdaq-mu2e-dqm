@@ -56,6 +56,20 @@ ROOT::RIO
 ROOT::Gui
 )
 
+
+cet_build_plugin(LumiDQM art::module LIBRARIES REG
+art_root_io::TFileService_service
+artdaq-core-mu2e::Data
+otsdaq-mu2e::ArtModules
+otsdaq::NetworkUtilities
+Offline::RecoDataProducts
+ROOT::Hist
+ROOT::Tree
+ROOT::Core
+ROOT::RIO
+ROOT::Gui
+)
+
 cet_build_plugin(TrackerDQM art::module LIBRARIES REG
 art_root_io::TFileService_service
 artdaq-core-mu2e::Data
