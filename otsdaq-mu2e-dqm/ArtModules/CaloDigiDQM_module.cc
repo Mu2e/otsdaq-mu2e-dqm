@@ -732,6 +732,9 @@ class CaloDigiDQM : public art::EDAnalyzer
 	void   fillDqmSummary(EventStats const& stats, int eventBlock, double meanLaserAmp);
 	void   streamIfScheduled();
 
+	void clearSummarySendQueues();
+	void clearWaveformSendQueues();
+
 	void fillIssue(int boardID, IssueType issue);
 	void fillHealth(int boardID, double healthScore, EventStats& stats, int eventBlock);
 
@@ -912,7 +915,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 	// -----------------------
 	// Disk-map running mean
 	// -----------------------
-	static constexpr int kMaxSipmIdForMaps_ = 10000;  // Safety cap for vector sizing
+	static constexpr int kMaxSipmIdForMaps_    = 10000;  // Safety cap for vector sizing
+	static constexpr int kMaxCrystalIdForMaps_ = (kMaxSipmIdForMaps_ + 1) / 2;
 
 	static bool validIndexedSipmId(int sid)
 	{
@@ -1390,7 +1394,13 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::vector<int>      featStamp_;  // featStamp[sipmId] equals pairStamp when valid.
 	std::vector<int>
 	    pairedStamp_;  // pairedStamp[crystalId] equals pairStamp when paired.
-	std::vector<uint16_t> sipmMultiplicity_;  // usable digis per sipmId in this event.
+
+	// Per-event usable digi multiplicity by SiPM.
+	// This is intentionally not cleared every event.
+	// A value is valid only when sipmMultiplicityStamp_[sid] == pairStamp_.
+	// incMultiplicity() lazily resets the counter for the current event,
+	// and getMultiplicity() returns 0 for stale entries.
+	std::vector<uint16_t> sipmMultiplicity_;
 	std::vector<int>      sipmMultiplicityStamp_;
 
 	// Reused per-event containers.
@@ -1622,7 +1632,7 @@ void CaloDigiDQM::allocateBuffers()
 
 	feat_.assign((size_t)kMaxSipmIdForMaps_, SipmFeat{});
 	featStamp_.assign((size_t)kMaxSipmIdForMaps_, 0);
-	pairedStamp_.assign((size_t)(kMaxSipmIdForMaps_ / 2 + 2), 0);
+	pairedStamp_.assign((size_t)kMaxCrystalIdForMaps_, 0);
 	sipmMultiplicity_.assign((size_t)kMaxSipmIdForMaps_, 0u);
 	sipmMultiplicityStamp_.assign((size_t)kMaxSipmIdForMaps_, 0);
 
@@ -2964,6 +2974,37 @@ bool CaloDigiDQM::decodeAddress(CaloDigi const&   digi,
 	return true;
 }
 
+void CaloDigiDQM::clearSummarySendQueues()
+{
+	for(int bidx : updatedBoards_)
+	{
+		if(bidx >= 0 && bidx < kTotalBoards)
+			boardQueuedForSend_[(size_t)bidx] = 0u;
+	}
+
+	updatedBoards_.clear();
+	laserBoardUpdated_ = false;
+}
+
+void CaloDigiDQM::clearWaveformSendQueues()
+{
+	for(int cidx : updatedRegularChannels_)
+	{
+		if(cidx >= 0 && cidx < kTotalChannels)
+			regularQueuedForSend_[(size_t)cidx] = 0u;
+	}
+
+	updatedRegularChannels_.clear();
+
+	for(int chan : updatedLaserChannels_)
+	{
+		if(chan >= 0 && chan < kLaserChannels)
+			laserQueuedForSend_[(size_t)chan] = 0u;
+	}
+
+	updatedLaserChannels_.clear();
+}
+
 // ===========================
 // Event processing
 // ===========================
@@ -4077,26 +4118,10 @@ void CaloDigiDQM::streamIfScheduled()
 			laserLiveWaveformUpdated_[(size_t)chan] = 0u;
 
 		if(doSummariesEvent)
-		{
-			for(int bidx : updatedBoards_)
-				boardQueuedForSend_[(size_t)bidx] = 0u;
-
-			updatedBoards_.clear();
-			laserBoardUpdated_ = false;
-		}
+			clearSummarySendQueues();
 
 		if(doWaveforms)
-		{
-			for(int cidx : updatedRegularChannels_)
-				regularQueuedForSend_[(size_t)cidx] = 0u;
-
-			updatedRegularChannels_.clear();
-
-			for(int chan : updatedLaserChannels_)
-				laserQueuedForSend_[(size_t)chan] = 0u;
-
-			updatedLaserChannels_.clear();
-		}
+			clearWaveformSendQueues();
 	}
 	catch(const std::exception& e)
 	{
@@ -4108,8 +4133,12 @@ void CaloDigiDQM::streamIfScheduled()
 		    << histConsecutiveSendErrors_ << ", total=" << histTotalSendErrors_
 		    << "): " << e.what();
 
+		// Keep queues after transient send failures to allow retry.
+		// Queued flags prevent duplicate growth; queues are cleared if streaming is disabled.
 		if(histConsecutiveSendErrors_ >= kMaxSendErrors_)
 		{
+			clearSummarySendQueues();
+			clearWaveformSendQueues();
 			sendHists_ = false;
 			histSender_.reset();
 
@@ -4127,8 +4156,12 @@ void CaloDigiDQM::streamIfScheduled()
 		                            << "(consecutive=" << histConsecutiveSendErrors_
 		                            << ", total=" << histTotalSendErrors_ << ").";
 
+		// Keep queues after transient send failures to allow retry.
+		// Queued flags prevent duplicate growth; queues are cleared if streaming is disabled.
 		if(histConsecutiveSendErrors_ >= kMaxSendErrors_)
 		{
+			clearSummarySendQueues();
+			clearWaveformSendQueues();
 			sendHists_ = false;
 			histSender_.reset();
 
