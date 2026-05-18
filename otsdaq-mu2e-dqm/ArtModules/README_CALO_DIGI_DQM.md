@@ -6,51 +6,6 @@ The module is designed for both offline ROOT-file inspection and online DQM use.
 
 ---
 
-## Quick start
-
-Minimal offline run:
-
-```bash
-mu2e -c running.fcl -s input.art -T output.root
-```
-
-Minimal analyzer fragment:
-
-```fhicl
-physics.analyzers.caloDigiDQM : {
-  module_type: "CaloDigiDQM"
-  caloDigiModuleLabel: "caloDigis"
-
-  sendHists: false
-  address: "127.0.0.1"
-  port: 8000
-  moduleTag: "CaloDigiDQM"
-
-  freqDQM: 100
-  freqWaveforms: 500
-  enableDiskMaps: false
-  diskCombines: ["asym"]
-
-  useReferenceFile: false
-  referenceFile: ""
-}
-
-physics.e1 : [ caloDigiDQM ]
-```
-
-First histograms to inspect in a new output file:
-
-```text
-Global_Histograms/h_dqm_summary
-Global_Histograms/h_dqm_run_counters
-Global_Histograms/h_occ_sparse
-Global_Histograms/h_issue_board
-Global_Histograms/h_health_board
-Global_Histograms/h_skip_reason
-```
-
----
-
 ## Build and runtime context
 
 This module is intended to run inside the Mu2e `art`/Offline environment with ROOT output through `art::TFileService`.
@@ -171,7 +126,7 @@ The mapped board ID determines the processing path:
 
 | Condition              | Meaning                          | Processing path             |
 | ---------------------- | -------------------------------- | --------------------------- |
-| `boardID == 160`       | Laser board digi                 | `processLaserDigi()`        |
+| `boardID == 160`       | Laser board digi                | `processLaserDigi()`        |
 | `boardID in 0-79`      | Disk 0 regular digi              | `processRegularDigi()`      |
 | `boardID in 80-159`    | Disk 1 regular digi              | `processRegularDigi()`      |
 | Invalid or unmapped ID | Bad mapping or out-of-range data | Digi is skipped and counted |
@@ -441,49 +396,19 @@ The summary values are bounded between `0` and `1`:
 
 ## Configuration
 
-The module is configured through FHiCL.
+In the current implementation, all listed parameters are part of the FHiCL configuration interface. Some streaming-related parameters are shown even when `sendHists=false`; they are required by the current configuration but are only operationally used when streaming is enabled.
 
-Example:
+A complete test job is provided at:
 
-```fhicl
-physics.analyzers.caloDigiDQM : {
-  module_type: "CaloDigiDQM"
-
-  # Input CaloDigi collection
-  caloDigiModuleLabel: "caloDigis"
-
-  # Streaming configuration
-  sendHists: false
-  address: "127.0.0.1"
-  port: 8000
-  moduleTag: "CaloDigiDQM"
-
-  # Streaming cadence
-  # 0 disables the corresponding stream category.
-  freqDQM: 100
-  freqWaveforms: 500
-
-  # Disk maps are always written to the ROOT file.
-  # This flag controls online streaming only.
-  enableDiskMaps: false
-
-  # Disk-map modes selected for streaming only.
-  # Allowed: "amp", "sum", "asym", "baseline", "rms".
-  # If empty, "asym" is streamed by default.
-  diskCombines: ["asym"]
-
-  # Optional reference overlay file.
-  useReferenceFile: false
-  referenceFile: ""
-}
-
-physics.e1 : [ caloDigiDQM ]
+```text
+otsdaq-mu2e-dqm/test/test_CaloDQM.fcl
 ```
 
-Run example:
+That file runs `CaloDigisFromDTCEvents` first and then runs `CaloDigiDQM` on the produced `CaloDigiCollection`.
 
+Run example from the `otsdaq-mu2e-dqm/test/` directory:
 ```bash
-mu2e -c running.fcl -s input.art -T output.root
+mu2e -c test_CaloDQM.fcl
 ```
 
 ### Configuration parameters
@@ -492,15 +417,17 @@ mu2e -c running.fcl -s input.art -T output.root
 | --------------------- | ---------------- | ---------------------------------------------------------------------------------------- |
 | `caloDigiModuleLabel` | string           | Input tag label for the `CaloDigiCollection`                                             |
 | `sendHists`           | bool             | Enables streaming through `ots::HistoSender`                                             |
-| `address`             | string           | otsdaq receiver address; required when `sendHists=true`                                  |
-| `port`                | int              | otsdaq receiver port; must be positive when `sendHists=true`                             |
-| `moduleTag`           | string           | Top-level namespace for streamed histogram paths                                         |
-| `freqDQM`             | int              | Event cadence for summary/board/global streaming; `0` disables summary streaming         |
-| `freqWaveforms`       | int              | Event cadence for live and first-hit waveform streaming; `0` disables waveform streaming |
+| `address`             | string           | otsdaq receiver address; currently required by FHiCL, validated/used when `sendHists=true`                                  |
+| `port`                | int              | otsdaq receiver port; currently required by FHiCL, validated/used when `sendHists=true`                             |
+| `moduleTag`           | string           | Top-level namespace for streamed histogram paths; currently required by FHiCL, operationally used when `sendHists=true`                                         |
+| `freqDQM`       | int | Event cadence for summary, board, global, laser, and DQM-status streaming; currently required by FHiCL, must be `>= 0`, and only affects online output when `sendHists=true`. A value of `0` disables this streaming category. |
+| `freqWaveforms` | int | Event cadence for live waveform, first-hit waveform, and global waveform-density streaming; currently required by FHiCL, must be `>= 0`, and only affects online output when `sendHists=true`. A value of `0` disables waveform streaming. |
 | `enableDiskMaps`      | bool             | Enables disk-map streaming; disk maps are still written to ROOT regardless               |
-| `diskCombines`        | sequence<string> | Disk-map modes to stream                                                                 |
+| `diskCombines`        | sequence<string> | Disk-map modes to stream; currently required by FHiCL, operationally used for disk-map streaming                                                                 |
 | `useReferenceFile`    | bool             | Enables loading optional reference histograms                                            |
-| `referenceFile`       | string           | Path to reference ROOT file                                                              |
+| `referenceFile`       | string           | Path to reference ROOT file; currently required by FHiCL, operationally used when `useReferenceFile=true`                                                              |
+
+`freqDQM` and `freqWaveforms` do not affect which histograms are saved to the ROOT file. ROOT output is filled independently of the streaming cadence. If `sendHists=false`, these frequency values are still read and validated, but no histogram streaming is attempted.
 
 Configuration validation:
 
@@ -621,17 +548,17 @@ Laser/
 
 Not every ROOT histogram is streamed online. This is intentional.
 
-| Histogram category    | Saved to ROOT     | Streamed online                         | Notes                                             |
-| --------------------- | ----------------- | --------------------------------------- | ------------------------------------------------- |
-| Global summaries      | Yes               | Yes, if `freqDQM > 0`                   | Core DQM status and global diagnostics            |
-| Board summaries       | Yes               | Yes, for updated boards                 | Only active/updated boards are sent               |
-| Channel distributions | Yes               | No by default                           | Can be numerous; intended for ROOT inspection     |
-| Live waveforms        | Yes               | Yes, if updated and `freqWaveforms > 0` | Latest representative waveform                    |
-| First-hit waveforms   | Yes               | Yes, once per active channel            | Static first observed waveform                    |
-| Disk maps             | Yes               | Optional                                | Controlled by `enableDiskMaps` and `diskCombines` |
-| Board health trends   | Yes               | No by default                           | Large payload; saved for offline inspection       |
-| Laser board summaries | Yes               | Yes, if laser board updated             | Board 160 only                                    |
-| Reference overlays    | Loaded optionally | Narrow supported subset                 | See reference section                             |
+| Histogram category    | Saved to ROOT      | Streamed online                                                            | Notes                                             |
+| --------------------- | ------------------ | -------------------------------------------------------------------------- | ------------------------------------------------- |
+| Global summaries      | Yes                | Yes, if `sendHists=true` and `freqDQM > 0`                                 | Core DQM status and global diagnostics            |
+| Board summaries       | Yes                | Yes, if `sendHists=true`, `freqDQM > 0`, and boards were updated           | Only active/updated boards are sent               |
+| Channel distributions | Yes                | No by default                                                              | Can be numerous; intended for ROOT inspection     |
+| Live waveforms        | Yes                | Yes, if `sendHists=true`, `freqWaveforms > 0`, and channels were updated   | Latest representative waveform                    |
+| First-hit waveforms   | Yes                | Yes, if `sendHists=true` and `freqWaveforms > 0`                           | Static first observed waveform                    |
+| Disk maps             | Yes                | Yes, if `sendHists=true`, `enableDiskMaps=true`, the disk-map streaming cadence is reached, and the mode is selected by `diskCombines` | Controlled by `enableDiskMaps` and `diskCombines` |
+| Board health trends   | Yes                | No by default                                                              | Large payload; saved for offline inspection       |
+| Laser board summaries | Yes                | Yes, if `sendHists=true`, `freqDQM > 0`, and the laser board was updated   | Board 160 only                                    |
+| Reference overlays    | Loaded optionally  | Narrow supported subset                                                    | See reference section                             |
 
 ---
 
