@@ -54,6 +54,7 @@
 #include "TProfile.h"
 #include "TProfile2D.h"
 #include "TString.h"
+#include "TGraph.h"
 
 #include "cetlib_except/exception.h"
 
@@ -69,6 +70,7 @@
 #include <sstream>
 #include <string>
 #include <vector>
+#include <fstream>
 
 namespace mu2e
 {
@@ -570,6 +572,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 	static constexpr int kEventBlockSize  = 100;
 	static constexpr int kEventTrendNBins = 4000;
+  static constexpr uint64_t kHitsAverageBlock = 1000;
 
 	static constexpr int kExpectedPeakTick = 30;
 	static constexpr int kSaturationAdc    = 4090;
@@ -706,8 +709,13 @@ class CaloDigiDQM : public art::EDAnalyzer
 	// Event-processing helpers
 	// -----------------------
 	void beginEvent();
-	void fillEventLevelCounters(EventStats const& stats, int eventBlock);
-	void processDigi(CaloDigi const&   digi,
+  void fillEventLevelCounters(EventStats const& stats,
+                              int               eventBlock,
+                              double            eventNumber);
+  void accumulateHitsAverage(double eventNumber, int nHits);
+  void flushHitsAveragePoint();
+
+  void processDigi(CaloDigi const&   digi,
 	                 CaloDAQMap const& calodaqconds,
 	                 EventStats&       stats,
 	                 int               eventBlock);
@@ -1114,6 +1122,25 @@ class CaloDigiDQM : public art::EDAnalyzer
 			group.push_back(h);
 	}
 
+  static void addGraph(std::vector<TGraph*>& group, TGraph* g)
+  {
+    if(g)
+      group.push_back(g);
+  }
+
+  static void updateNormalizedHist(TH1* src, TH1* dst)
+  {
+    if(!src || !dst)
+      return;
+
+    dst->Reset("ICESM");
+    dst->Add(src);
+
+    const double integral = dst->Integral();
+    if(integral > 0.0)
+      dst->Scale(1.0 / integral);
+  }
+
 	static bool isLaserBoard(int boardID) { return boardID == kLaserBoardID; }
 
 	void ensureLaserBoardBooked();
@@ -1133,6 +1160,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 	void ensureBoardBooked(int disk, int boardID);
 	void ensureLiveWaveformBooked(
 	    int disk, int boardID, int chanID, int rawId, int sipmId);
+
+  void prebookExpectedChannelsFromCaloDAQMap(CaloDAQMap const& calodaqconds);
 
 	template<class WaveformT>
 	void ensureFirstHitBooked(int              disk,
@@ -1157,6 +1186,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 	int         port_;
 	std::string moduleTag_;
 	bool        sendHists_;
+
+  bool prebookedExpectedChannels_{false};
 
 	bool        waveformDensityUpdated_{false};
 	std::string streamWaveformDensityPath_;
@@ -1261,7 +1292,17 @@ class CaloDigiDQM : public art::EDAnalyzer
 	TH1F*     h_dqm_issue_counts_{nullptr};
 	TH1F*     h_dqm_run_counters_{nullptr};
 	TProfile* h_dqm_summary_block_{nullptr};
+  
+  TH1F*   h_occ_board_{nullptr};
+  TH1F*   h_occ_board_norm_{nullptr};
+  TGraph* g_nhits_ewt_{nullptr};
 
+  double   nhitsBlockSum_{0.0};
+  double   eventNumberBlockSum_{0.0};
+  uint64_t nhitsBlockCount_{0};
+
+  TH2F*     h_asym_chanid_{nullptr};
+  
 	std::array<BoardHists, kTotalBoards>                           boardH_{};
 	std::array<std::unique_ptr<art::TFileDirectory>, kTotalBoards> boardHistDir_{};
 	std::array<std::unique_ptr<art::TFileDirectory>, kTotalBoards> boardChanDir_{};
@@ -1345,6 +1386,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::string streamGlobalPath_;
 	std::string streamDqmSummaryPath_;
 	std::string streamLaserBoardPath_;
+  std::string streamShifterPath_;
 
 	std::array<std::string, kNMapModes>     streamDiskMapPath_{};
 	std::array<std::string, kTotalBoards>   streamBoardPath_{};
@@ -1683,6 +1725,7 @@ void CaloDigiDQM::precomputeStreamPaths()
 {
 	streamGlobalPath_          = moduleTag_ + "/Global:replace";
 	streamDqmSummaryPath_      = moduleTag_ + "/DQM_Summary:replace";
+        streamShifterPath_ = moduleTag_ + "/Shifter:replace";
 	streamLaserBoardPath_      = moduleTag_ + "/Laser/Board160:replace";
 	streamWaveformDensityPath_ = moduleTag_ + "/Waveforms/GlobalWaveformDensity:replace";
 
@@ -2201,6 +2244,50 @@ void CaloDigiDQM::bookGlobalHistograms()
 		h->GetYaxis()->SetTitle(yTitle);
 		return h;
 	};
+
+        h_occ_board_ =
+          globalDir_->make<TH1F>("h_occ_board",
+                                 "Occupancy vs Board ID;Board ID;Hit Count",
+                                 161,
+                                 0,
+                                 161);
+        h_occ_board_->SetStats(0);
+        h_occ_board_->SetLineWidth(2);
+
+        h_occ_board_norm_ =
+          globalDir_->make<TH1F>("h_occ_board_norm",
+                                 "Normalized Occupancy vs Board ID;Board ID;Fraction of hits",
+                                 161,
+                                 0,
+                                 161);
+        h_occ_board_norm_->SetStats(0);
+        h_occ_board_norm_->SetLineWidth(2);
+
+        g_nhits_ewt_ =
+          globalDir_->makeAndRegister<TGraph>(
+                                              "g_nhits_ewt",
+                                              "Average Number of CaloDigis vs Event Number;Event number;Mean CaloDigis/event",
+                                              0);
+
+        g_nhits_ewt_->SetMarkerStyle(20);
+        g_nhits_ewt_->SetMarkerSize(0.7);
+        g_nhits_ewt_->SetLineColor(kBlue + 1);
+        g_nhits_ewt_->SetMarkerColor(kBlue + 1);
+        g_nhits_ewt_->SetDrawOption("P");
+
+        h_asym_chanid_ =
+          globalDir_->make<TH2F>("h_asym_chanid",
+                                 "Asymmetry vs Encoded Channel ID;Encoded Channel "
+                                 "(boardID*100 + chanID);(L - R)/(L + R)",
+                                 axisSparse.nBins,
+                                 axisSparse.xMin,
+                                 axisSparse.xMax,
+                                 100,
+                                 -1.0,
+                                 1.0);
+        h_asym_chanid_->SetStats(0);
+        h_asym_chanid_->SetOption("COLZ");
+        h_asym_chanid_->GetZaxis()->SetTitle("Count");
 
 	h_baseline_sparse_ =
 	    makeGlobalProfile("h_base_sparse",
@@ -3024,13 +3111,49 @@ void CaloDigiDQM::beginEvent()
 	laserRepSeen_.fill(0u);
 }
 
-void CaloDigiDQM::fillEventLevelCounters(EventStats const& stats, int eventBlock)
+void CaloDigiDQM::accumulateHitsAverage(double eventNumber, int nHits)
 {
-	if(h_evt_digis_)
-		h_evt_digis_->Fill(stats.nDigis);
+  nhitsBlockSum_ += (double)nHits;
+  eventNumberBlockSum_ += eventNumber;
+  ++nhitsBlockCount_;
 
-	if(h_digis_block_)
-		h_digis_block_->Fill(eventBlock, stats.nDigis);
+  if(nhitsBlockCount_ >= kHitsAverageBlock)
+    flushHitsAveragePoint();
+}
+
+void CaloDigiDQM::flushHitsAveragePoint()
+{
+  if(!g_nhits_ewt_)
+    return;
+
+  if(nhitsBlockCount_ == 0)
+    return;
+
+  const double meanHits =
+    nhitsBlockSum_ / (double)nhitsBlockCount_;
+
+  const double meanEventNumber =
+    eventNumberBlockSum_ / (double)nhitsBlockCount_;
+
+  const int n = g_nhits_ewt_->GetN();
+  g_nhits_ewt_->SetPoint(n, meanEventNumber, meanHits);
+
+  nhitsBlockSum_ = 0.0;
+  eventNumberBlockSum_ = 0.0;
+  nhitsBlockCount_ = 0;
+}
+
+void CaloDigiDQM::fillEventLevelCounters(EventStats const& stats,
+                                         int               eventBlock,
+                                         double            eventNumber)
+{
+  if(h_evt_digis_)
+    h_evt_digis_->Fill(stats.nDigis);
+
+  if(h_digis_block_)
+    h_digis_block_->Fill(eventBlock, stats.nDigis);
+
+  accumulateHitsAverage(eventNumber, stats.nDigis);
 }
 
 void CaloDigiDQM::analyze(art::Event const& event)
@@ -3049,7 +3172,9 @@ void CaloDigiDQM::analyze(art::Event const& event)
 	if(stats.nDigis >= kEvtDigisHistMax)
 		++nEvtDigisOverflow_;
 
-	fillEventLevelCounters(stats, eventBlock);
+        const double eventNumber = static_cast<double>(event.id().event());
+
+        fillEventLevelCounters(stats, eventBlock, eventNumber);
 
 	for(const auto& digi : caloDigis)
 		processDigi(digi, calodaqconds, stats, eventBlock);
@@ -3129,6 +3254,8 @@ void CaloDigiDQM::processLaserDigi(CaloDigi const&    digi,
 		h_occupancy_dense_->Fill(encodedDense);
 	if(h_global_board_vs_channel_)
 		h_global_board_vs_channel_->Fill(boardID, chanID);
+        if(h_occ_board_)
+          h_occ_board_->Fill(boardID);
 	if(laserBoardH_.occ)
 		laserBoardH_.occ->Fill(chanID);
 
@@ -3266,6 +3393,8 @@ void CaloDigiDQM::processRegularDigi(CaloDigi const&    digi,
 		h_global_board_vs_channel_->Fill(boardID, chanID);
 	if(h_occupancy_sparse_)
 		h_occupancy_sparse_->Fill(encodedSparse);
+        if(h_occ_board_)
+          h_occ_board_->Fill(boardID);
 	if(h_occupancy_dense_)
 		h_occupancy_dense_->Fill(encodedDense);
 
@@ -3649,6 +3778,12 @@ void CaloDigiDQM::processPairs(EventStats& stats, int eventBlock)
 		if(h_asymmetry_)
 			h_asymmetry_->Fill(asym);
 
+                if(h_asym_chanid_)
+                  {
+                    h_asym_chanid_->Fill(encodeSparse(fL.board, fL.chan), asym);
+                    h_asym_chanid_->Fill(encodeSparse(fR.board, fR.chan), asym);
+                  }
+
 		if(h_asym_board_)
 		{
 			h_asym_board_->Fill(fL.board, asym);
@@ -3887,6 +4022,7 @@ void CaloDigiDQM::streamIfScheduled()
 	}
 
 	std::map<std::string, std::vector<TH1*>> hists_to_send;
+        std::map<std::string, std::vector<TGraph*>> graphs_to_send;
 
 	regularOneHitSentThisCall_.clear();
 	laserOneHitSentThisCall_.clear();
@@ -3897,6 +4033,15 @@ void CaloDigiDQM::streamIfScheduled()
 	{
 		auto& g   = hists_to_send[streamGlobalPath_];
 		auto& dqm = hists_to_send[streamDqmSummaryPath_];
+                auto& shifter       = hists_to_send[streamShifterPath_];
+                auto& shifterGraphs = graphs_to_send[streamShifterPath_];
+
+                updateNormalizedHist(h_occ_board_, h_occ_board_norm_);
+
+                addHist(shifter, h_occ_board_norm_);
+                addGraph(shifterGraphs, g_nhits_ewt_);
+                addHist(shifter, h_amp_sparse_);
+                addHist(shifter, h_asym_chanid_);
 
 		addHist(dqm, h_dqm_summary_);
 		addHist(dqm, h_dqm_issue_counts_);
@@ -4076,12 +4221,16 @@ void CaloDigiDQM::streamIfScheduled()
 			    h_global_waveform_density_);
 	}
 
-	if(hists_to_send.empty())
+	if(hists_to_send.empty() && graphs_to_send.empty())
 		return;
 
 	try
 	{
-		histSender_->sendHistograms(hists_to_send);
+          if(!hists_to_send.empty())
+            histSender_->sendHistograms(hists_to_send);
+
+          if(!graphs_to_send.empty())
+            histSender_->sendGraphs(graphs_to_send);
 		histConsecutiveSendErrors_ = 0;
 
 		if(doWaveforms && waveformDensityUpdated_)
@@ -4178,10 +4327,12 @@ void CaloDigiDQM::streamIfScheduled()
 void CaloDigiDQM::endJob()
 {
 	// Final flush ensures ROOT output captures last cached values.
+  flushHitsAveragePoint();
 	flushAllLiveWaveforms();
 	flushAllLaserLiveWaveforms();
 	refreshDiskMaps();
-
+        updateNormalizedHist(h_occ_board_, h_occ_board_norm_);
+        
 	std::ostringstream skips;
 	skips << " skipCounts={";
 	for(int i = 0; i < (int)SkipReason::Count; ++i)
