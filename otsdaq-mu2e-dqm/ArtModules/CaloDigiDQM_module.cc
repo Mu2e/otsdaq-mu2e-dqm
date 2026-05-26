@@ -6,16 +6,18 @@
 // Responsibilities:
 //   - read CaloDigi objects
 //   - map offline SiPM IDs to electronics IDs via CaloDAQMap
+//   - Prebook the expected board/channel ROOT structure from CaloDAQMap at the start
+//     of the first event, while still tracking which channels actually appear in the input data.
 //   - fill ROOT histograms for global, disk, board, channel, and laser monitoring
 //   - optionally stream selected histograms to otsdaq via HistoSender
 //
 // Maintainer notes:
 //   - boardID is a global board index across both disks
-//   - channelIndex(...) returns a compact global channel index
-//   - disk maps are always saved to ROOT
-//   - enableDiskMaps affects streaming only
-//   - board 160 is treated as the dedicated laser board and is handled separately
-//     from regular disk/board/channel monitoring
+//   - board 160 is treated as the dedicated laser board
+//   - channelIndex(...) returns a compact global index for regular channels only
+//   - activeRegularChannels_ and activeLaserChannels_ contain channels seen in data,
+//     not all prebooked channels
+//   - disk maps are always saved to ROOT; enableDiskMaps controls streaming only
 //   - reference histograms are optional; missing reference files or objects do not
 //     stop the module
 //   - live waveform streaming is update-driven to reduce network load
@@ -169,32 +171,36 @@ class CaloDigiDQM : public art::EDAnalyzer
 	struct Config
 	{
 		// otsdaq destination and top-level namespace for streamed histograms
-		fhicl::Atom<std::string> address{fhicl::Name("address")};
-		fhicl::Atom<int>         port{fhicl::Name("port")};
-		fhicl::Atom<std::string> moduleTag{fhicl::Name("moduleTag")};
-		fhicl::Atom<bool>        sendHists{fhicl::Name("sendHists")};
+		fhicl::Atom<std::string> address{fhicl::Name("address"),
+		                                 "mu2edaq11-data.fnal.gov"};
+		fhicl::Atom<int>         port{fhicl::Name("port"), 6000};
+		fhicl::Atom<std::string> moduleTag{fhicl::Name("moduleTag"), "CaloDigiDQM"};
+		fhicl::Atom<bool>        sendHists{fhicl::Name("sendHists"), false};
 
 		// Event cadence for streaming
 		// freqDQM controls summary histograms
 		// freqWaveforms controls live waveform streaming
-		fhicl::Atom<int> freqDQM{fhicl::Name("freqDQM")};
-		fhicl::Atom<int> freqWaveforms{
-		    fhicl::Name("freqWaveforms")};  // 0 = disable waveform streaming
+		fhicl::Atom<int> freqDQM{fhicl::Name("freqDQM"), 100};
+		fhicl::Atom<int> freqWaveforms{fhicl::Name("freqWaveforms"),
+		                               0};  // 0 = disable waveform streaming
 
 		// art input tag label for the CaloDigiCollection
-		fhicl::Atom<std::string> caloDigiModuleLabel{fhicl::Name("caloDigiModuleLabel")};
+		fhicl::Atom<std::string> caloDigiModuleLabel{fhicl::Name("caloDigiModuleLabel"),
+		                                             "CaloDigi"};
 
 		// Disk maps are always saved to the ROOT file.
 		// This flag controls disk-map streaming only.
-		fhicl::Atom<bool> enableDiskMaps{fhicl::Name("enableDiskMaps")};
+		fhicl::Atom<bool> enableDiskMaps{fhicl::Name("enableDiskMaps"), false};
 
 		// Disk map streaming selection only, examples {"asym"} or {"asym", "sum"}.
 		// Disk maps are streamed less frequently than summary histograms.
-		fhicl::Sequence<std::string> diskCombines{fhicl::Name("diskCombines")};
+		fhicl::Sequence<std::string> diskCombines{fhicl::Name("diskCombines"),
+		                                          std::vector<std::string>{"asym"}};
 
 		// Optional reference ROOT file for comparison histograms.
-		fhicl::Atom<bool>        useReferenceFile{fhicl::Name("useReferenceFile")};
-		fhicl::Atom<std::string> referenceFile{fhicl::Name("referenceFile")};
+		fhicl::Atom<bool>        useReferenceFile{fhicl::Name("useReferenceFile"), false};
+		fhicl::Atom<std::string> referenceFile{fhicl::Name("referenceFile"),
+                  "reference.root"};
 	};
 
 	explicit CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config);
@@ -1161,7 +1167,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 	void ensureLiveWaveformBooked(
 	    int disk, int boardID, int chanID, int rawId, int sipmId);
 
-	void prebookExpectedChannelsFromCaloDAQMap(CaloDAQMap const& calodaqconds);
+	// Create the expected empty ROOT folder/histogram structure from CaloDAQMap.
+	void prebookExpectedStructureFromCaloDAQMap(CaloDAQMap const& calodaqconds);
 
 	template<class WaveformT>
 	void ensureFirstHitBooked(int              disk,
@@ -1187,7 +1194,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::string moduleTag_;
 	bool        sendHists_;
 
-	bool prebookedExpectedChannels_{false};
+	// True after the expected ROOT structure is prebooked from CaloDAQMap.
+	bool prebookedExpectedStructure_{false};
 
 	bool        waveformDensityUpdated_{false};
 	std::string streamWaveformDensityPath_;
@@ -1296,7 +1304,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 	TH1F*   h_occ_board_{nullptr};
 	TH1F*   h_occ_board_norm_{nullptr};
 	TGraph* g_nhits_ewt_{nullptr};
-
+  
 	double   nhitsBlockSum_{0.0};
 	double   eventNumberBlockSum_{0.0};
 	uint64_t nhitsBlockCount_{0};
@@ -1325,7 +1333,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::array<uint8_t, kLaserChannels> laserOneHitSeen_{};
 	std::array<uint8_t, kLaserChannels> laserOneHitSent_{};
 	std::array<uint8_t, kLaserChannels> laserLiveWaveformUpdated_{};
-	std::array<uint8_t, kLaserChannels> laserChannelBooked_{};
+	// Laser channels that have actually appeared in the input data.
+	std::array<uint8_t, kLaserChannels> laserChannelSeen_{};
 
 	std::array<WaveformSizeStats, kLaserChannels> laserWfStats_{};
 
@@ -1351,9 +1360,10 @@ class CaloDigiDQM : public art::EDAnalyzer
 	std::vector<TH1F*>             h_max_dist_;
 	std::vector<TH1F*>             h_asym_dist_;
 
-	std::vector<uint8_t> channelBooked_;
+	// Regular channels that have actually appeared in the input data.
+	std::vector<uint8_t> channelSeen_;
 
-	// Streaming bookkeeping.
+	// Channels/objects that appeared or changed during processing.
 	std::vector<int> activeRegularChannels_;
 	std::vector<int> activeLaserChannels_;
 	std::vector<int> updatedBoards_;
@@ -1649,7 +1659,7 @@ void CaloDigiDQM::allocateBuffers()
 	h_rms_dist_.assign(kTotalChannels, nullptr);
 	h_max_dist_.assign(kTotalChannels, nullptr);
 	h_asym_dist_.assign(kTotalChannels, nullptr);
-	channelBooked_.assign(kTotalChannels, 0u);
+	channelSeen_.assign(kTotalChannels, 0u);
 
 	activeRegularChannels_.reserve(kTotalChannels);
 	activeLaserChannels_.reserve(kLaserChannels);
@@ -2259,11 +2269,11 @@ void CaloDigiDQM::bookGlobalHistograms()
 	h_occ_board_norm_->SetStats(0);
 	h_occ_board_norm_->SetLineWidth(2);
 
-	g_nhits_ewt_ = globalDir_->makeAndRegister<TGraph>(
-	    "g_nhits_ewt",
-	    "Average Number of CaloDigis vs Event Number;Event number;Mean CaloDigis/event",
-	    0);
-
+        g_nhits_ewt_ = globalDir_->makeAndRegister<TGraph>(
+                                                           "g_nhits_ewt",
+                                                           "Average Number of CaloDigis vs art Event Number;art event number;Mean CaloDigis/event",
+                                                           0);
+        
 	g_nhits_ewt_->SetMarkerStyle(20);
 	g_nhits_ewt_->SetMarkerSize(0.7);
 	g_nhits_ewt_->SetLineColor(kBlue + 1);
@@ -2407,8 +2417,11 @@ void CaloDigiDQM::fillBoardIssueMetric(int boardID, int chanID, IssueType issue)
 }
 
 // ===========================
-// Lazy booking helpers
+// Idempotent booking / prebooking helpers
 // ===========================
+//
+// Used both for CaloDAQMap-based prebooking and runtime fallback.
+// Booking state is separate from whether a channel has appeared in data.
 
 TH1F* CaloDigiDQM::ensureChannelDistBooked(
     std::vector<TH1F*>&                                             storage,
@@ -2513,7 +2526,8 @@ void CaloDigiDQM::ensureLaserBoardBooked()
 {
 	if(!laserBoardHistDir_ || !laserBoardChanDir_)
 	{
-		art::TFileDirectory boardDir = laserDir_->mkdir("Board_160");
+		art::TFileDirectory boardDir =
+		    laserDir_->mkdir(Form("Board_%03d", kLaserBoardID));
 
 		laserBoardHistDir_ =
 		    std::make_unique<art::TFileDirectory>(boardDir.mkdir("Histograms"));
@@ -2674,8 +2688,8 @@ void CaloDigiDQM::ensureBoardBooked(int disk, int boardID)
 
 	if(!boardHistDir_[(size_t)bidx] || !boardChanDir_[(size_t)bidx])
 	{
-		art::TFileDirectory boardDir = (disk == 0 ? *disk0Dir_ : *disk1Dir_)
-		                                   .mkdir("Board_" + std::to_string(boardID));
+		art::TFileDirectory boardDir =
+		    (disk == 0 ? *disk0Dir_ : *disk1Dir_).mkdir(Form("Board_%03d", boardID));
 
 		boardHistDir_[(size_t)bidx] =
 		    std::make_unique<art::TFileDirectory>(boardDir.mkdir("Histograms"));
@@ -3149,12 +3163,128 @@ void CaloDigiDQM::fillEventLevelCounters(EventStats const& stats,
 	accumulateHitsAverage(eventNumber, stats.nDigis);
 }
 
+void CaloDigiDQM::prebookExpectedStructureFromCaloDAQMap(CaloDAQMap const& calodaqconds)
+{
+	size_t nRegularChannels = 0;
+	size_t nLaserChannels   = 0;
+	size_t nUnmapped        = 0;
+	size_t nInvalid         = 0;
+
+	std::vector<uint8_t>                prebookedRegular((size_t)kTotalChannels, 0u);
+	std::array<uint8_t, kLaserChannels> prebookedLaser{};
+	prebookedLaser.fill(0u);
+
+	for(int sipmId = 0; sipmId < kMaxSipmIdForMaps_; ++sipmId)
+	{
+		int rawId = kUnmappedRawId;
+
+		try
+		{
+			rawId = calodaqconds.rawId(mu2e::CaloSiPMId(sipmId)).id();
+		}
+		catch(const std::exception&)
+		{
+			++nInvalid;
+			continue;
+		}
+		catch(...)
+		{
+			++nInvalid;
+			continue;
+		}
+
+		if(rawId == kUnmappedRawId)
+		{
+			++nUnmapped;
+			continue;
+		}
+
+		if(rawId < 0)
+		{
+			++nInvalid;
+			continue;
+		}
+
+		const int boardID = rawId / kChannelsPerBoard;
+		const int chanID  = rawId % kChannelsPerBoard;
+
+		if(chanID < 0 || chanID >= kChannelsPerBoard)
+		{
+			++nInvalid;
+			continue;
+		}
+
+		if(isLaserBoard(boardID))
+		{
+			if(chanID < 0 || chanID >= kLaserChannels)
+			{
+				++nInvalid;
+				continue;
+			}
+
+			ensureLaserBoardBooked();
+			ensureLaserBaselineDistBooked(chanID);
+			ensureLaserRmsDistBooked(chanID);
+			ensureLaserMaxDistBooked(chanID);
+			ensureLaserLiveWaveformBooked(chanID, rawId, sipmId);
+
+			if(!prebookedLaser[(size_t)chanID])
+			{
+				prebookedLaser[(size_t)chanID] = 1u;
+				++nLaserChannels;
+			}
+
+			continue;
+		}
+
+		const int disk = boardID / kBoardsPerDisk;
+
+		if(!validRegularChannel(disk, boardID, chanID))
+		{
+			++nInvalid;
+			continue;
+		}
+
+		const int cidx = channelIndex(disk, boardID, chanID);
+
+		if(cidx < 0 || cidx >= kTotalChannels)
+		{
+			++nInvalid;
+			continue;
+		}
+
+		ensureBoardBooked(disk, boardID);
+		ensureBaselineDistBooked(disk, boardID, chanID);
+		ensureRmsDistBooked(disk, boardID, chanID);
+		ensureMaxDistBooked(disk, boardID, chanID);
+		ensureAsymDistBooked(disk, boardID, chanID);
+		ensureLiveWaveformBooked(disk, boardID, chanID, rawId, sipmId);
+
+		if(!prebookedRegular[(size_t)cidx])
+		{
+			prebookedRegular[(size_t)cidx] = 1u;
+			++nRegularChannels;
+		}
+	}
+
+	mf::LogInfo("CaloDigiDQM")
+	    << "Prebooked expected CaloDigiDQM ROOT structure from CaloDAQMap:"
+	    << " regularChannels=" << nRegularChannels << " laserChannels=" << nLaserChannels
+	    << " unmappedSipmIds=" << nUnmapped << " invalidEntries=" << nInvalid;
+}
+
 void CaloDigiDQM::analyze(art::Event const& event)
 {
 	beginEvent();
 
 	const auto& caloDigis    = *event.getValidHandle<CaloDigiCollection>(caloDigiTag_);
 	const auto& calodaqconds = calodaqconds_h_.get(event.id());
+
+	if(!prebookedExpectedStructure_)
+	{
+		prebookExpectedStructureFromCaloDAQMap(calodaqconds);
+		prebookedExpectedStructure_ = true;
+	}
 
 	const int eventBlock = (eventCounter_ / kEventBlockSize >= (uint64_t)kEventTrendNBins)
 	                           ? kEventTrendNBins - 1
@@ -3165,10 +3295,10 @@ void CaloDigiDQM::analyze(art::Event const& event)
 	if(stats.nDigis >= kEvtDigisHistMax)
 		++nEvtDigisOverflow_;
 
-	const double eventNumber = static_cast<double>(event.id().event());
+        const double eventNumber = static_cast<double>(event.id().event());
 
-	fillEventLevelCounters(stats, eventBlock, eventNumber);
-
+        fillEventLevelCounters(stats, eventBlock, eventNumber);
+        
 	for(const auto& digi : caloDigis)
 		processDigi(digi, calodaqconds, stats, eventBlock);
 
@@ -3230,14 +3360,15 @@ void CaloDigiDQM::processLaserDigi(CaloDigi const&    digi,
 	ensureLaserBoardBooked();
 	laserBoardUpdated_ = true;
 
-	if(!laserChannelBooked_[(size_t)chanID])
+	// First time this laser channel appears in data; ensure histograms exist.
+	if(!laserChannelSeen_[(size_t)chanID])
 	{
 		ensureLaserBaselineDistBooked(chanID);
 		ensureLaserRmsDistBooked(chanID);
 		ensureLaserMaxDistBooked(chanID);
 		ensureLaserLiveWaveformBooked(chanID, rawId, sipmId);
 
-		laserChannelBooked_[(size_t)chanID] = 1u;
+		laserChannelSeen_[(size_t)chanID] = 1u;
 		activeLaserChannels_.push_back(chanID);
 	}
 
@@ -3366,14 +3497,15 @@ void CaloDigiDQM::processRegularDigi(CaloDigi const&    digi,
 
 	ensureBoardBooked(disk, boardID);
 
-	if(!channelBooked_[(size_t)cidx])
+	// First time this channel appears in data; ensure histograms exist.
+	if(!channelSeen_[(size_t)cidx])
 	{
 		ensureBaselineDistBooked(disk, boardID, chanID);
 		ensureRmsDistBooked(disk, boardID, chanID);
 		ensureMaxDistBooked(disk, boardID, chanID);
 		ensureLiveWaveformBooked(disk, boardID, chanID, rawId, sipmId);
 
-		channelBooked_[(size_t)cidx] = 1u;
+		channelSeen_[(size_t)cidx] = 1u;
 		activeRegularChannels_.push_back(cidx);
 	}
 
@@ -4129,9 +4261,7 @@ void CaloDigiDQM::streamIfScheduled()
 			addHist(boardGroup, bh.quality);
 			addHist(boardGroup, bh.issue);
 
-			// Saved to ROOT, but not streamed by default.
-			// This object is relatively large: kBoardTrendNBins * kChannelsPerBoard per board.
-			// Streaming it for all active boards can dominate the payload size.
+			// Large object: saved to ROOT, not streamed by default.
 			// addHist(boardGroup, bh.healthTrend);
 		}
 	}
@@ -4336,14 +4466,14 @@ void CaloDigiDQM::endJob()
 	}
 	skips << "}";
 
-	mf::LogInfo("CaloDigiDQM") << "CaloDigiDQM summary:"
-	                           << " events=" << eventCounter_ << " d0=" << nFillDisk0_
-	                           << " d1=" << nFillDisk1_ << " laser=" << nFillLaser_
-	                           << " miss=" << nFillMiss_
-	                           << " consecutiveSendErr=" << histConsecutiveSendErrors_
-	                           << " totalSendErr=" << histTotalSendErrors_
-	                           << " outOfRangeSipmId=" << nOutOfRangeSipmId_
-	                           << skips.str();
+        mf::LogInfo("CaloDigiDQM") << "CaloDigiDQM summary:"
+                                   << " events=" << eventCounter_ << " d0=" << nFillDisk0_
+                                   << " d1=" << nFillDisk1_ << " laser=" << nFillLaser_
+                                   << " miss=" << nFillMiss_
+                                   << " consecutiveSendErr=" << histConsecutiveSendErrors_
+                                   << " totalSendErr=" << histTotalSendErrors_
+                                   << " outOfRangeSipmId=" << nOutOfRangeSipmId_
+                                   << skips.str();
 
 	struct Row
 	{
