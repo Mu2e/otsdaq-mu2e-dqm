@@ -200,7 +200,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 		// Optional reference ROOT file for comparison histograms.
 		fhicl::Atom<bool>        useReferenceFile{fhicl::Name("useReferenceFile"), false};
 		fhicl::Atom<std::string> referenceFile{fhicl::Name("referenceFile"),
-                  "reference.root"};
+		                                       "reference.root"};
 	};
 
 	explicit CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config);
@@ -1304,7 +1304,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 	TH1F*   h_occ_board_{nullptr};
 	TH1F*   h_occ_board_norm_{nullptr};
 	TGraph* g_nhits_ewt_{nullptr};
-  
+
 	double   nhitsBlockSum_{0.0};
 	double   eventNumberBlockSum_{0.0};
 	uint64_t nhitsBlockCount_{0};
@@ -2269,11 +2269,12 @@ void CaloDigiDQM::bookGlobalHistograms()
 	h_occ_board_norm_->SetStats(0);
 	h_occ_board_norm_->SetLineWidth(2);
 
-        g_nhits_ewt_ = globalDir_->makeAndRegister<TGraph>(
-                                                           "g_nhits_ewt",
-                                                           "Average Number of CaloDigis vs art Event Number;art event number;Mean CaloDigis/event",
-                                                           0);
-        
+	g_nhits_ewt_ = globalDir_->makeAndRegister<TGraph>(
+	    "g_nhits_ewt",
+	    "Average Number of CaloDigis vs art Event Number;art event number;Mean "
+	    "CaloDigis/event",
+	    0);
+
 	g_nhits_ewt_->SetMarkerStyle(20);
 	g_nhits_ewt_->SetMarkerSize(0.7);
 	g_nhits_ewt_->SetLineColor(kBlue + 1);
@@ -3295,10 +3296,10 @@ void CaloDigiDQM::analyze(art::Event const& event)
 	if(stats.nDigis >= kEvtDigisHistMax)
 		++nEvtDigisOverflow_;
 
-        const double eventNumber = static_cast<double>(event.id().event());
+	const double eventNumber = static_cast<double>(event.id().event());
 
-        fillEventLevelCounters(stats, eventBlock, eventNumber);
-        
+	fillEventLevelCounters(stats, eventBlock, eventNumber);
+
 	for(const auto& digi : caloDigis)
 		processDigi(digi, calodaqconds, stats, eventBlock);
 
@@ -4466,14 +4467,14 @@ void CaloDigiDQM::endJob()
 	}
 	skips << "}";
 
-        mf::LogInfo("CaloDigiDQM") << "CaloDigiDQM summary:"
-                                   << " events=" << eventCounter_ << " d0=" << nFillDisk0_
-                                   << " d1=" << nFillDisk1_ << " laser=" << nFillLaser_
-                                   << " miss=" << nFillMiss_
-                                   << " consecutiveSendErr=" << histConsecutiveSendErrors_
-                                   << " totalSendErr=" << histTotalSendErrors_
-                                   << " outOfRangeSipmId=" << nOutOfRangeSipmId_
-                                   << skips.str();
+	mf::LogInfo("CaloDigiDQM") << "CaloDigiDQM summary:"
+	                           << " events=" << eventCounter_ << " d0=" << nFillDisk0_
+	                           << " d1=" << nFillDisk1_ << " laser=" << nFillLaser_
+	                           << " miss=" << nFillMiss_
+	                           << " consecutiveSendErr=" << histConsecutiveSendErrors_
+	                           << " totalSendErr=" << histTotalSendErrors_
+	                           << " outOfRangeSipmId=" << nOutOfRangeSipmId_
+	                           << skips.str();
 
 	struct Row
 	{
