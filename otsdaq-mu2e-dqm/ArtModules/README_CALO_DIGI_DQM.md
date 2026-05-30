@@ -2,7 +2,7 @@
 
 `CaloDigiDQM` is an `art::EDAnalyzer` for Mu2e calorimeter Data Quality Monitoring. It reads `CaloDigi` objects, maps offline SiPM IDs to electronics identifiers through `CaloDAQMap`, fills ROOT histograms for detector health and waveform diagnostics, and can optionally stream selected histograms to the otsdaq visualizer through `ots::HistoSender`.
 
-The module is designed for both offline ROOT-file inspection and online DQM use. ROOT output contains all histograms booked and filled for the processed data, including lazily created board/channel histograms for channels that appear in the input.
+The module is designed for both offline ROOT-file inspection and online DQM use. Global histograms and disk-map objects are booked during construction through `art::TFileService`. At the start of the first event, once `CaloDAQMap` is available, the module prebooks the expected regular board/channel structure and mapped laser-channel structure.
 
 ---
 
@@ -20,7 +20,7 @@ Main framework and detector dependencies:
 | `CaloDAQMap` through `ProditionsHandle`     | Mapping offline SiPM IDs to electronics IDs            |
 | `THMu2eCaloDisk`                            | Calorimeter disk maps                                  |
 | ROOT `TH1`, `TH2`, `TProfile`, `TProfile2D` | Histogram storage and display                          |
-| `ots::HistoSender`                          | Optional online histogram streaming to otsdaq          |
+| `ots::HistoSender`                          | Optional online histogram streaming to the Visualizer App |
 
 The module does not implement a raw data decoder. It consumes already-produced `CaloDigi` objects and focuses on DQM feature extraction, histogram organization, and optional online streaming.
 
@@ -32,7 +32,7 @@ The module does not implement a raw data decoder. It consumes already-produced `
 * Convert each offline `SiPMID` to electronics coordinates using `CaloDAQMap`.
 * Fill global detector summaries for occupancy, baseline, RMS, amplitude, waveform size, pair completeness, waveform health, issue counts, and run counters.
 * Fill per-disk `THMu2eCaloDisk` maps for amplitude, crystal sum, left/right asymmetry, baseline, and RMS.
-* Lazily create board-level and channel-level histograms only for channels that appear in the data.
+* Prebook the expected board/channel ROOT structure from `CaloDAQMap` at the start of the first event, while still tracking which channels actually appear in the input data.
 * Treat board `160` as the dedicated laser board and monitor it separately from regular disk boards.
 * Optionally stream selected summary, board, disk-map, live waveform, first-hit waveform, and laser histograms to otsdaq.
 * Optionally overlay a small set of reference histograms when a reference ROOT file is provided. Reference-file overlay support is experimental and intentionally limited. It may be simplified or replaced later if `.rcfg` dashboards with the `superimposed` option become the preferred way to display overlays.
@@ -66,7 +66,8 @@ Important implementation choices:
 * Regular calorimeter data and laser-board data are handled by separate code paths.
 * Pair-based quantities are calculated after all digis in the event have been processed.
 * Live waveform streaming uses one representative waveform per SiPM/channel per event.
-* Disk maps are running means accumulated over the job and refreshed before streaming and at `endJob()`.
+* Disk maps are running means accumulated over the job.
+* Selected streamed disk-map modes are refreshed before disk-map streaming, and all disk-map modes are refreshed at endJob().
 * ROOT-file output remains available even if online streaming is disabled or fails.
 
 ---
@@ -117,7 +118,7 @@ Each `CaloDigi` is mapped to electronics coordinates through `CaloDAQMap`:
 
 ```text
 sipmId  = digi.SiPMID()
-rawId   = CaloDAQMap(raw SiPM id lookup)
+rawId   = calodaqconds.rawId(mu2e::CaloSiPMId(sipmId)).id()
 boardID = rawId / 20
 chanID  = rawId % 20
 ```
@@ -126,7 +127,7 @@ The mapped board ID determines the processing path:
 
 | Condition              | Meaning                          | Processing path             |
 | ---------------------- | -------------------------------- | --------------------------- |
-| `boardID == 160`       | Laser board digi                | `processLaserDigi()`        |
+| `boardID == 160`       | Laser board digi                 | `processLaserDigi()`        |
 | `boardID in 0-79`      | Disk 0 regular digi              | `processRegularDigi()`      |
 | `boardID in 80-159`    | Disk 1 regular digi              | `processRegularDigi()`      |
 | Invalid or unmapped ID | Bad mapping or out-of-range data | Digi is skipped and counted |
@@ -134,6 +135,57 @@ The mapped board ID determines the processing path:
 Skipped digis are not silently ignored. They are counted in `h_skip_reason` and summarized in `endJob()`.
 
 ---
+
+## Prebooked ROOT structure
+
+At the start of the first event, the module retrieves `CaloDAQMap` and calls `prebookExpectedStructureFromCaloDAQMap()`. This creates the expected ROOT folder and histogram structure for mapped regular calorimeter channels and mapped laser channels.
+
+For regular mapped channels, the module prebooks:
+
+```text
+Board folder
+Board summary histograms
+Baseline distribution
+RMS distribution
+Max ADC distribution
+Asymmetry distribution
+Live waveform histogram
+```
+
+For laser channels, the module prebooks:
+```text
+Laser board folder
+Laser board summary histograms
+Laser baseline distribution
+Laser RMS distribution
+Laser max ADC distribution
+Laser live waveform histogram
+```
+
+First-hit waveform histograms are not prebooked. They are created only when the channel is actually observed for the first time.
+
+For one tested `CaloDAQMap` configuration, the prebooked structure was:
+
+```text
+regularBoards = 136 / 160
+regularChannels = 2712 / 3200
+laserBoards = 1 / 1
+laserChannels = 4 / 20
+totalBoardsIncludingLaser = 137
+totalChannelsIncludingLaser = 2716
+```
+
+These numbers are map-dependent and should be treated as an example, not a hard-coded guarantee.
+
+The module keeps separate concepts of prebooked channels and active channels:
+
+| Concept | Meaning |
+| ------- | ------- |
+| Prebooked channel | Channel found in `CaloDAQMap`; its ROOT folder/histograms may exist even before data is seen |
+| Active channel | Channel that actually appeared in the input data |
+| Updated channel | Active channel whose live waveform changed and may be streamed |
+
+An empty board or channel histogram can be normal: it may represent a mapped channel that was expected from `CaloDAQMap` but did not appear in the processed data.
 
 ## Pairing convention
 
@@ -210,7 +262,7 @@ Intermediate values can appear in profile histograms because bins are averaged o
 
 | Metric           | Meaning                                               |
 | ---------------- | ----------------------------------------------------- |
-| `Seen`           | Channel produced at least one usable digi             |
+| `Seen`           | Channel produced at least one mapped regular digi after address decoding  |
 | `AmpPositive`    | Baseline-subtracted amplitude is positive             |
 | `RMSOK`          | Baseline RMS is not above the module threshold        |
 | `SaturationOK`   | Waveform has no saturated samples                     |
@@ -265,7 +317,7 @@ WaveformHealth       = 1.0 - 0.55 = 0.45
 
 ## Heuristic constants and thresholds
 
-Several values in this module are intentionally heuristic. They are intended for online monitoring and anomaly detection, not final physics-quality classification.
+Several values in this module are intentionally heuristic. They are intended for online monitoring and issue detection, not final physics-quality classification.
 
 ### Waveform constants
 
@@ -380,7 +432,7 @@ Important interpretation detail:
 |   5 | `RMS_OK`        | Fraction-like score for waveforms with acceptable RMS                     |
 |   6 | `LaserSeen`     | At least one accepted positive-amplitude laser digi was seen in the event |
 |   7 | `DetLaserRatio` | Detector/laser amplitude ratio was available for the event                |
-|   8 | `HealthOK`      | mean event health score: waveform health, mild pair-miss health penalties |
+|   8 | `HealthOK`      | Mean event health score: waveform health and mild pair-miss health penalties |
 |   9 | `Overall`       | Average of the main status quantities                                     |
 
 The summary values are bounded between `0` and `1`:
@@ -396,44 +448,52 @@ The summary values are bounded between `0` and `1`:
 
 ## Configuration
 
-In the current implementation, all listed parameters are part of the FHiCL configuration interface. Some streaming-related parameters are shown even when `sendHists=false`; they are required by the current configuration but are only operationally used when streaming is enabled.
+The module is configured through FHiCL. The analyzer block can be written as:
 
-A complete test job is provided at:
+```fhicl
+physics.analyzers.caloDigiDQM : {
+  module_type: "CaloDigiDQM"
+  
+  # Optional; this is the default.
+  sendHists: false
+}
 
-```text
-otsdaq-mu2e-dqm/test/test_CaloDQM.fcl
+physics.e1 : [ caloDigiDQM ]
 ```
 
-That file runs `CaloDigisFromDTCEvents` first and then runs `CaloDigiDQM` on the produced `CaloDigiCollection`.
+Additional parameters can be provided to override the module defaults.
+
+A complete test configuration is provided at: `otsdaq-mu2e-dqm/test/test_CaloDQM.fcl`.
+
+That file reads an input .art file, runs CaloDigisFromDTCEvents to produce a CaloDigiCollection, and then runs CaloDigiDQM on the produced collection.
 
 Run example from the `otsdaq-mu2e-dqm/test/` directory:
+
 ```bash
 mu2e -c test_CaloDQM.fcl
 ```
 
 ### Configuration parameters
 
-| Parameter             | Type             | Meaning                                                                                  |
-| --------------------- | ---------------- | ---------------------------------------------------------------------------------------- |
-| `caloDigiModuleLabel` | string           | Input tag label for the `CaloDigiCollection`                                             |
-| `sendHists`           | bool             | Enables streaming through `ots::HistoSender`                                             |
-| `address`             | string           | otsdaq receiver address; currently required by FHiCL, validated/used when `sendHists=true`                                  |
-| `port`                | int              | otsdaq receiver port; currently required by FHiCL, validated/used when `sendHists=true`                             |
-| `moduleTag`           | string           | Top-level namespace for streamed histogram paths; currently required by FHiCL, operationally used when `sendHists=true`                                         |
-| `freqDQM`       | int | Event cadence for summary, board, global, laser, and DQM-status streaming; currently required by FHiCL, must be `>= 0`, and only affects online output when `sendHists=true`. A value of `0` disables this streaming category. |
-| `freqWaveforms` | int | Event cadence for live waveform, first-hit waveform, and global waveform-density streaming; currently required by FHiCL, must be `>= 0`, and only affects online output when `sendHists=true`. A value of `0` disables waveform streaming. |
-| `enableDiskMaps`      | bool             | Enables disk-map streaming; disk maps are still written to ROOT regardless               |
-| `diskCombines`        | sequence<string> | Disk-map modes to stream; currently required by FHiCL, operationally used for disk-map streaming                                                                 |
-| `useReferenceFile`    | bool             | Enables loading optional reference histograms                                            |
-| `referenceFile`       | string           | Path to reference ROOT file; currently required by FHiCL, operationally used when `useReferenceFile=true`                                                              |
-
-`freqDQM` and `freqWaveforms` do not affect which histograms are saved to the ROOT file. ROOT output is filled independently of the streaming cadence. If `sendHists=false`, these frequency values are still read and validated, but no histogram streaming is attempted.
+| Parameter | Type | Default | Meaning |
+| --------- | ---- | ------- | ------- |
+| `caloDigiModuleLabel` | string | `"CaloDigisFromDTCEvents"` | Input tag label for the `CaloDigiCollection` |
+| `sendHists` | bool | `false` | Enables streaming through `ots::HistoSender` |
+| `address` | string | `"mu2e-dl-01-data.fnal.gov"` | otsdaq receiver address |
+| `port` | int | `6000` | otsdaq receiver port |
+| `moduleTag` | string | `"CaloDigiDQM"` | Top-level namespace for streamed histogram paths |
+| `freqDQM` | int | `100` | Event cadence for summary/board/global streaming; `0` disables summary streaming |
+| `freqWaveforms` | int | `0` | Event cadence for live and first-hit waveform streaming; `0` disables waveform streaming |
+| `enableDiskMaps` | bool | `false` | Enables disk-map streaming; disk maps are still written to ROOT regardless |
+| `diskCombines` | sequence<string> | `["asym"]` | Disk-map modes to stream |
+| `useReferenceFile` | bool | `false` | Enables loading optional reference histograms |
+| `referenceFile` | string | `"reference.root"` | Path to reference ROOT file |
 
 Configuration validation:
 
 * `freqDQM` must be `>= 0`.
 * `freqWaveforms` must be `>= 0`.
-* If `sendHists=true`, then `address`, `port`, and `moduleTag` must be valid.
+* If `sendHists=true`, then `address` and `moduleTag` must be non-empty, and `port` must be positive.
 * Unknown `diskCombines` entries throw a `BADCONFIG` exception.
 
 ---
@@ -444,11 +504,14 @@ The output ROOT file is organized into top-level folders:
 
 ```text
 output.root
-+-- Global_Histograms/
-+-- Disk0/
-+-- Disk1/
-+-- Laser/
++-- <analyzer_label>/
+    +-- Global_Histograms/
+    +-- Disk0/
+    +-- Disk1/
+    +-- Laser/
 ```
+
+The ROOT-file top-level folder is determined by the FHiCL analyzer label, for example `caloDigiDQM` or `myAnalysis`. The online streaming namespace is determined separately by `moduleTag`.
 
 ### `Global_Histograms/`
 
@@ -476,6 +539,11 @@ h_max_sparse
 h_max_dense
 h_asym
 h_board_vs_channel
+h_occ_board
+h_occ_board_norm
+g_nhits_ewt
+h_asym_chanid
+h_amp_dist
 h_waveform_density
 h_waveform_size
 h_skip_reason
@@ -488,14 +556,14 @@ disk0_RMS,       disk1_RMS
 
 ### `Disk0/` and `Disk1/`
 
-Each disk folder contains a disk-level board quality matrix and lazily booked board folders.
+Each disk folder contains a disk-level board quality matrix and board folders prebooked from `CaloDAQMap`.
 
 Example:
 
 ```text
 Disk0/
 +-- D0_BoardQualityMatrix
-+-- Board_27/
++-- Board_027/
     +-- Histograms/
     |   +-- D0_B027_Occupancy
     |   +-- D0_B027_Baseline
@@ -517,7 +585,7 @@ Disk0/
             +-- D0_B027_C00_AsymDist
 ```
 
-Board and channel folders are created only when data appears for that board/channel.
+Board and channel folders are generally prebooked from `CaloDAQMap` at the start of the first event. A folder or histogram may therefore exist even if that channel did not appear in the processed data. First-hit waveform histograms are still created only when a channel is actually observed.
 
 ### `Laser/`
 
@@ -548,17 +616,17 @@ Laser/
 
 Not every ROOT histogram is streamed online. This is intentional.
 
-| Histogram category    | Saved to ROOT      | Streamed online                                                            | Notes                                             |
-| --------------------- | ------------------ | -------------------------------------------------------------------------- | ------------------------------------------------- |
-| Global summaries      | Yes                | Yes, if `sendHists=true` and `freqDQM > 0`                                 | Core DQM status and global diagnostics            |
-| Board summaries       | Yes                | Yes, if `sendHists=true`, `freqDQM > 0`, and boards were updated           | Only active/updated boards are sent               |
-| Channel distributions | Yes                | No by default                                                              | Can be numerous; intended for ROOT inspection     |
-| Live waveforms        | Yes                | Yes, if `sendHists=true`, `freqWaveforms > 0`, and channels were updated   | Latest representative waveform                    |
-| First-hit waveforms   | Yes                | Yes, if `sendHists=true` and `freqWaveforms > 0`                           | Static first observed waveform                    |
-| Disk maps             | Yes                | Yes, if `sendHists=true`, `enableDiskMaps=true`, the disk-map streaming cadence is reached, and the mode is selected by `diskCombines` | Controlled by `enableDiskMaps` and `diskCombines` |
-| Board health trends   | Yes                | No by default                                                              | Large payload; saved for offline inspection       |
-| Laser board summaries | Yes                | Yes, if `sendHists=true`, `freqDQM > 0`, and the laser board was updated   | Board 160 only                                    |
-| Reference overlays    | Loaded optionally  | Narrow supported subset                                                    | See reference section                             |
+| Histogram category    | Saved to ROOT | Streamed online | Notes |
+| --------------------- | ------------- | --------------- | ----- |
+| Global summaries      | Yes | Yes, if `sendHists=true` and `freqDQM > 0` | Core DQM status and global diagnostics |
+| Board summaries       | Yes | Yes, if `sendHists=true`, `freqDQM > 0`, and boards were updated | Only active/updated boards are sent |
+| Channel distributions | Yes | No by default | Prebooked from `CaloDAQMap`; filled only after the channel appears |
+| Live waveforms        | Yes | Yes, if `sendHists=true`, `freqWaveforms > 0`, and channels were updated | Prebooked from `CaloDAQMap`; filled only after the channel appears |
+| First-hit waveforms   | Yes | Yes, if `sendHists=true` and `freqWaveforms > 0` | Created after the first observed hit and sent once on a waveform streaming cadence |
+| Disk maps             | Yes | Yes, if `sendHists=true`, `enableDiskMaps=true`, `freqDQM > 0`, and the disk-map cadence is reached | Controlled by `enableDiskMaps` and `diskCombines` |
+| Board health trends   | Yes | No by default | Large payload; saved for offline inspection |
+| Laser board summaries | Yes | Yes, if `sendHists=true`, `freqDQM > 0`, and the laser board was updated | Board 160 only |
+| Reference overlays    | Loaded optionally into memory | Narrow supported subset | See reference section |
 
 ---
 
@@ -716,12 +784,13 @@ Important behavior:
 
 * All disk-map modes are written to the ROOT file.
 * `diskCombines` controls only which modes are streamed online.
-* Disk maps are refreshed before streaming and again in `endJob()`.
+* Selected streamed disk-map modes are refreshed before disk-map streaming.
+* All disk-map modes are refreshed at endJob() before writing the final ROOT output.
 * Asymmetry values are displayed with range `[-1, 1]`.
 
 ### Board-level histograms
 
-Each active regular board gets:
+Each mapped regular board can be prebooked with:
 
 | Histogram                    | Purpose                              |
 | ---------------------------- | ------------------------------------ |
@@ -737,7 +806,7 @@ Each active regular board gets:
 
 ### Channel-level histograms
 
-Each active regular channel can get:
+Each mapped regular channel can have:
 
 | Histogram               | Purpose                                                      |
 | ----------------------- | ------------------------------------------------------------ |
@@ -747,6 +816,8 @@ Each active regular channel can get:
 | `D*_B*_C*_RMSDist`      | RMS distribution                                             |
 | `D*_B*_C*_MaxDist`      | Raw peak ADC distribution                                    |
 | `D*_B*_C*_AsymDist`     | Pair asymmetry distribution for that channel                 |
+
+`D*_B*_C*_FirstHit` is created only after the channel appears in data.
 
 Live waveform histograms store the most recent representative waveform and are flushed to the ROOT file at `endJob()`.
 
@@ -761,7 +832,7 @@ Laser board `160` is monitored separately:
 | `B160_RMS`                  | Mean laser RMS by channel                                     |
 | `B160_Max`                  | Mean laser raw peak ADC by channel                            |
 | `B160_C*_Waveform`          | Latest cached laser waveform, baseline-subtracted             |
-| `B160_C*_FirstHit`          | First observed laser waveform - baseline for that channel     |
+| `B160_C*_FirstHit`          | First observed laser waveform, baseline-subtracted            |
 | `B160_C*_BaselineDist`      | Laser baseline distribution                                   |
 | `B160_C*_RMSDist`           | Laser RMS distribution                                        |
 | `B160_C*_MaxDist`           | Laser raw peak ADC distribution                               |
@@ -839,7 +910,7 @@ The module creates one `ots::HistoSender` using the configured `address` and `po
 | Laser board summary     | `freqDQM`                            | Streamed only if laser board was updated        |
 | Disk maps               | `enableDiskMaps` and `freqDQM + 100` | Streamed less frequently than summaries         |
 | Live waveforms          | `freqWaveforms`                      | Only updated channels are streamed              |
-| First-hit waveforms     | `freqWaveforms`                      | Sent once per active channel after booking      |
+| First-hit waveforms     | `freqWaveforms`                      | Sent once per active channel on a waveform streaming cadence      |
 | Global waveform density | `freqWaveforms`                      | Sent only when updated                          |
 
 If no relevant histograms are updated, the module skips the send call.
@@ -853,6 +924,7 @@ Examples for `moduleTag = "CaloDigiDQM"`:
 ```text
 CaloDigiDQM/Global:replace
 CaloDigiDQM/DQM_Summary:replace
+CaloDigiDQM/Shifter:replace
 CaloDigiDQM/DiskMaps/Asym:replace
 CaloDigiDQM/Disk0/Board027:replace
 CaloDigiDQM/Waveforms/Disk0/Board027/Channel00:replace
@@ -887,6 +959,8 @@ Reference histogram support is experimental and intentionally limited.
 If `.rcfg` dashboards with the `superimposed` option provide a cleaner and more efficient way to display reference overlays in the otsdaq visualizer, this feature may be revised or removed in the future.
 
 If `useReferenceFile=true`, the module attempts to load selected objects from `referenceFile`. Missing files or missing objects do not stop the job; the module logs a warning and continues.
+
+Reference histograms are loaded from the top level of the reference ROOT file by exact object name. They are cloned into memory and may be included in selected streaming groups, but they are not part of the normal output ROOT histogram structure.
 
 Currently supported reference objects:
 
@@ -943,7 +1017,7 @@ Overflow-style counters are stored in `h_dqm_run_counters`:
 | `MappedDisk0Digis`     | Total regular digis mapped/classified to Disk 0               |
 | `MappedDisk1Digis`     | Total regular digis mapped/classified to Disk 1               |
 | `MappedLaserDigis`     | Total digis mapped/classified to laser board 160              |
-| `SkippedTotal`         | Total skipped/rejected digis across all skip reasons          |
+| `SkippedTotal`         | Total skip/diagnostic counts, including rejected digis and skipped derived calculations  |
 | `UnpairedThisEvent`    | Number of unpaired representative SiPMs in the current event  |
 | `TotalSendErrors`      | Total histogram streaming send failures                       |
 | `EvtDigisOverflow`     | Number of events exceeding the `h_evt_digis` display range    |
@@ -974,7 +1048,8 @@ This makes the output ROOT file complete even when live waveform streaming was d
 
 The module avoids unnecessary memory and network overhead through several design choices:
 
-* Board and channel histograms are lazily booked only when data appears.
+* The expected board/channel structure is prebooked from `CaloDAQMap` at the start of the first event.
+* First-hit waveform histograms remain lazily booked because they require an actual waveform sample.
 * Per-event SiPM state uses stamp-based validity instead of clearing large vectors every event.
 * Live waveforms are cached in fixed-size arrays of `64` bins.
 * Streaming queues use flags to avoid duplicate growth between send attempts.
@@ -998,256 +1073,6 @@ This pattern is used for:
 * per-event SiPM multiplicity.
 
 Rollover protection resets stamps if `pairStamp_` reaches `std::numeric_limits<int>::max()`.
-
----
-
-## Performance testing with `RandomCaloDigiProducer`
-
-A synthetic stress test can be run with `RandomCaloDigiProducer`, an `art::EDProducer` that creates randomized `CaloDigiCollection` objects using the real `CaloDAQMap`. This is useful for testing DQM throughput, histogram booking behavior, streaming payload size, skip counters, issue counters, and memory growth without requiring a real input data file.
-
-The producer generates paired SiPM digis for valid crystals and can inject controlled waveform/pathology types:
-
-| Injected flavor | Purpose                                                       |
-| --------------- | ------------------------------------------------------------- |
-| `Good`          | Normal paired digis with Gaussian-like pulses                 |
-| `PairMiss`      | Produces only one SiPM side of a crystal                      |
-| `Saturated`     | Produces high-amplitude waveforms near ADC saturation         |
-| `EdgePeak`      | Forces the peak close to the waveform edge                    |
-| `HighRMS`       | Uses larger baseline noise                                    |
-| `LowSNR`        | Uses low signal amplitude with larger noise                   |
-| `NegativeAmp`   | Produces a downward pulse to test negative amplitude handling |
-| `BadShape`      | Adds ringing, roughness, and tail-like structure              |
-
-### Example stress-test configuration
-
-```fhicl
-source: {
-  module_type: EmptyEvent
-  maxEvents: 500000
-  firstRun: 1
-  firstEvent: 1
-}
-
-physics.producers.myProducer: {
-  module_type: RandomCaloDigiProducer
-
-  nDigis: 50
-  waveformSize: 50
-  maxADC: 4095
-  seed: 1234
-
-  fracPairMiss:    0.10
-  fracSaturated:   0.08
-  fracEdgePeak:    0.08
-  fracHighRMS:     0.08
-  fracLowSNR:      0.08
-  fracNegativeAmp: 0.05
-  fracBadShape:    0.08
-}
-
-physics.analyzers.myAnalysis: {
-  module_type: CaloDigiDQM
-  caloDigiModuleLabel: "myProducer"
-
-  address: "127.0.0.1"
-  port: 8000
-  moduleTag: "SimpleDQM"
-
-  freqDQM: 100
-  freqWaveforms: 100
-  sendHists: true
-
-  enableDiskMaps: false
-  diskCombines: ["amp"]
-
-  useReferenceFile: false
-  referenceFile: "./reference.root"
-}
-
-physics.p1: [ myProducer ]
-physics.e1: [ myAnalysis ]
-physics.trigger_paths: [ p1 ]
-physics.end_paths: [ e1 ]
-```
-
-This configuration runs `500,000` empty events, generates `50` synthetic digis per event, and sends DQM summaries and waveform updates every `100` events.
-
-### Simple receiver for measuring streamed payload
-
-A lightweight TCP receiver can be used to measure the raw amount of histogram data sent by `HistoSender`:
-
-```bash
-python3 receiver.py --host 0.0.0.0 --port 8000 --idle-gap 0.2 --recv-size 65536
-```
-
-The receiver does not decode histograms. It only counts bytes, chunks, bursts, elapsed time, and average socket throughput. This makes it useful for payload-size and streaming-rate tests.
-
-### Example result
-
-Test setup:
-
-| Quantity                  |                       Value |
-| ------------------------- | --------------------------: |
-| Events                    |                   `500,000` |
-| Synthetic digis per event |                        `50` |
-| Total produced digis      |                `25,000,000` |
-| Waveform size             |                `50` samples |
-| `freqDQM`                 |                       `100` |
-| `freqWaveforms`           |                       `100` |
-| Disk-map streaming        |                    Disabled |
-| Streaming target          | Localhost, `127.0.0.1:8000` |
-| ROOT output               | `random_calo_dqm_test.root` |
-
-End-job DQM summary:
-
-```text
-CaloDigiDQM summary:
-  events=500000
-  d0=12480926
-  d1=12482273
-  laser=36801
-  miss=0
-  consecutiveSendErr=0
-  totalSendErr=0
-  outOfRangeSipmId=0
-  skipCounts={BadSipmId:0, UnmappedRawId:0, OutOfRangeSipmId:0,
-              RawIdNegative:0, DiskOutOfRange:0, PeakPosOutOfRange:0,
-              NonFiniteBaselineOrRms:0, TinyDenomAsym:1}
-
-Waveform-size summary:
-  channels_seen=2712
-  variable=0
-  nbins=64
-
-Laser waveform-size summary:
-  channels_seen=4
-  variable=0
-  nbins=64
-```
-In this end-job summary, `miss` is the invalid regular mapping count, not the SiPM pair-miss count. Pair-missing behavior is monitored through `h_unpaired_evt`, `h_pair_ok_board`, `h_pair_miss_frac_block`, and the `PairMiss` issue category.
-
-The mapped digi totals are internally consistent:
-
-```text
-Disk 0 digis + Disk 1 digis + Laser digis
-= 12,480,926 + 12,482,273 + 36,801
-= 25,000,000 digis
-```
-
-### Timing results
-
-`TimeTracker` output:
-
-| Component                | Average time / event | Median time / event | Max time / event |
-| ------------------------ | -------------------: | ------------------: | ---------------: |
-| Full event               |      `0.000582084 s` |     `0.000362284 s` |    `0.0712259 s` |
-| `RandomCaloDigiProducer` |      `0.000143156 s` |       `0.0001391 s` |    `0.0054007 s` |
-| `CaloDigiDQM`            |      `0.000392708 s` |     `0.000179538 s` |    `0.0709097 s` |
-
-Derived approximate rates:
-
-| Metric                                      |             Value |
-| ------------------------------------------- | ----------------: |
-| Full job throughput from real time          | `~1,614 events/s` |
-| Full job throughput from average event time | `~1,718 events/s` |
-| DQM-only throughput from average DQM time   | `~2,546 events/s` |
-| DQM average processing cost                 |   `~393 us/event` |
-| DQM average processing cost per digi        |   `~7.85 us/digi` |
-| Producer average processing cost            |   `~143 us/event` |
-| Producer average processing cost per digi   |   `~2.86 us/digi` |
-
-Total job summary:
-
-| Quantity  |        Value |
-| --------- | -----------: |
-| CPU time  |   `305.09 s` |
-| Real time |   `309.78 s` |
-| VmPeak    | `1161.91 MB` |
-| VmHWM     |  `558.58 MB` |
-
-### Streaming payload result
-
-Receiver output:
-
-```text
-[receiver] burst=1,
-  bytes=39425354492 (36.72 GB),
-  chunks=604634,
-  time=301.870s,
-  rate=124.55 MB/s,
-  total=36.72 GB
-
-[receiver] Connection closed.
-  Total bytes=39425354492 (36.72 GB),
-  chunks=604634,
-  bursts=1,
-  time=309.85s,
-  avg_rate=121.35 MB/s
-```
-
-Derived payload estimates:
-
-| Metric                      |                                Value |
-| --------------------------- | -----------------------------------: |
-| Total streamed payload      | `39,425,354,492 bytes` (`36.72 GiB`) |
-| Average payload per event   |                     `~78.9 kB/event` |
-| Average payload per digi    |                      `~1.58 kB/digi` |
-| Average receiver throughput |                          `~121 MB/s` |
-| Burst throughput            |                          `~125 MB/s` |
-
-Because the receiver uses an idle-gap-based burst definition, the full run appeared as one continuous burst. With this configuration, the job produced send activity often enough that the receiver did not observe a long idle gap between sends.
-
-### What this test demonstrates
-
-This test validates several important behaviors:
-
-* The module processed `500,000` events and `25 million` synthetic digis without module failures.
-* `CaloDAQMap` decoding worked for all generated digis used by the producer.
-* No send errors occurred during localhost streaming.
-* No out-of-range SiPM IDs were observed.
-* Waveform sizes were stable for all active regular and laser channels.
-* Disk 0, Disk 1, and laser counts summed exactly to the expected number of generated digis.
-* The DQM module sustained roughly millisecond-subscale event processing with streaming enabled.
-* Memory stayed bounded during a long synthetic run.
-
-### Caveats
-
-This is a stress/validation test, not a direct measurement of production online performance.
-
-Important caveats:
-
-* The input is synthetic and generated from `RandomCaloDigiProducer`, not real detector data.
-* Streaming was sent to localhost, so network latency and remote receiver behavior were not tested.
-* The receiver counted raw socket bytes only; it did not parse or validate histogram objects.
-* `freqDQM=100` and `freqWaveforms=100` are aggressive settings and can produce a large payload.
-* The max DQM event time is dominated by occasional expensive streaming or large send operations, not typical per-event histogram filling.
-* The injected pathology fractions are useful for testing DQM logic but do not represent expected detector rates.
-
-### Additional performance scans
-
-The stress-test result above shows one tested configuration. The following additional scans are recommended for a more complete performance study:
-
-| Scan                                | Purpose                                             |
-| ----------------------------------- | --------------------------------------------------- |
-| `nDigis = 50, 100, 500, 1000`       | Measure scaling with event occupancy                |
-| `waveformSize = 50, 100, 200`       | Measure scaling with waveform length                |
-| `sendHists = false` vs `true`       | Separate histogram-filling cost from streaming cost |
-| `freqDQM = 100, 500, 1000`          | Measure summary streaming payload sensitivity       |
-| `freqWaveforms = 100, 500, 1000, 0` | Measure live waveform streaming cost                |
-| `enableDiskMaps = false/true`       | Measure disk-map streaming overhead                 |
-| local receiver vs remote receiver   | Measure network and receiver effects                |
-
-A useful minimal benchmark matrix is:
-
-```text
-1. sendHists=false, nDigis=50
-2. sendHists=true,  freqDQM=1000, freqWaveforms=0
-3. sendHists=true,  freqDQM=1000, freqWaveforms=1000
-4. sendHists=true,  freqDQM=100,  freqWaveforms=100
-5. sendHists=true,  freqDQM=100,  freqWaveforms=100, enableDiskMaps=true
-```
-
-This separates pure DQM processing, summary streaming, waveform streaming, aggressive streaming, and disk-map streaming.
 
 ---
 
@@ -1331,13 +1156,13 @@ This dashboard answers:
 Use this when checking laser data and detector/laser normalization:
 
 ```text
-Laser/Board_160/B160_Occupancy
-Laser/Board_160/B160_Baseline
-Laser/Board_160/B160_RMS
-Laser/Board_160/B160_Max
-h_laser_block
-h_amp_laser_block
-h_amp_laser_board_channel
+<analyzer_label>/Laser/Board_160/Histograms/B160_Occupancy
+<analyzer_label>/Laser/Board_160/Histograms/B160_Baseline
+<analyzer_label>/Laser/Board_160/Histograms/B160_RMS
+<analyzer_label>/Laser/Board_160/Histograms/B160_Max
+<analyzer_label>/Global_Histograms/h_laser_block
+<analyzer_label>/Global_Histograms/h_amp_laser_block
+<analyzer_label>/Global_Histograms/h_amp_laser_board_channel
 ```
 
 This dashboard answers:
@@ -1444,10 +1269,10 @@ Pair problems can indicate missing partner digis, mapping inconsistencies, unexp
 
 Check:
 
-1. `h_laser_block`
-2. `h_amp_laser_block`
-3. `h_amp_laser_board_channel`
-4. `Laser/Board_160/B160_Max`
+1. `<analyzer_label>/Global_Histograms/h_laser_block`
+2. `<analyzer_label>/Global_Histograms/h_amp_laser_block`
+3. `<analyzer_label>/Global_Histograms/h_amp_laser_board_channel`
+4. `<analyzer_label>/Laser/Board_160/Histograms/B160_Max`
 5. regular detector amplitude profiles such as `h_amp_dense`
 
 If laser amplitude changes and detector/laser ratio remains stable, the detector response may be stable. If the ratio changes locally, inspect the corresponding board/channel.
@@ -1462,9 +1287,9 @@ After running the module on a test file, check:
 2. `h_skip_reason` does not show a large unexpected mapping or waveform rejection rate.
 3. `h_occ_sparse` and `h_board_vs_channel` show expected active boards and channels.
 4. Disk 0 and Disk 1 maps are filled after `endJob()`.
-5. Board folders are created only for active boards.
-6. Channel folders are created only for active channels.
-7. Live waveform histograms contain baseline-subtracted values.
+5. Board and channel folders match the expected structure from `CaloDAQMap`.
+6. Empty prebooked channel histograms are understood as mapped channels that did not appear in the processed data.
+7. First-hit waveform histograms are created only for channels that actually appeared.
 8. First-hit waveforms are filled once and remain unchanged.
 9. `h_pair_ok_board` and pair topology histograms behave as expected for paired SiPM data.
 10. If laser data are present, `Laser/Board_160` and `h_laser_block` are filled.
@@ -1487,7 +1312,14 @@ Check:
 
 ### ROOT file exists, but some board/channel folders are missing
 
-This is expected if those boards/channels did not appear in the data. Board and channel histograms are lazily booked.
+The expected board/channel structure is prebooked from `CaloDAQMap` after the first event begins. If a board or channel folder is missing, check:
+
+* at least one event was processed,
+* the channel exists in `CaloDAQMap`,
+* the mapped `rawId` is valid,
+* the channel maps to a regular board `0-159` or laser board `160`.
+
+First-hit waveform histograms are an exception: they are created only when the channel actually appears in the data.
 
 ### Disk maps exist in ROOT even when `enableDiskMaps=false`
 
@@ -1544,7 +1376,7 @@ This module is organized around a few recurring extension patterns.
 | -------------------------------- | ----------------------------------------------------------------------------------- |
 | Add a global summary histogram   | data member, `bookGlobalHistograms()`, fill site, `streamIfScheduled()` if streamed |
 | Add a board-level diagnostic     | `BoardHists`, `ensureBoardBooked()`, fill site, optional board streaming group      |
-| Add a channel-level distribution | storage vector, `allocateBuffers()`, lazy booking helper, fill site                 |
+| Add a channel-level distribution | storage vector, `allocateBuffers()`, `ensure...Booked()` helper, optional prebooking call, fill site |
 | Add a disk-map quantity          | `MapMode`, parser, suffix, titles, accumulation, README tables                      |
 | Add a new issue type             | `IssueType`, `issueLabel()`, issue maps, issue-count logic, README tables           |
 | Add a new quality metric         | `QualityMetric`, `qualityMetricLabel()`, quality matrix filling, README tables      |
@@ -1571,13 +1403,14 @@ This module is organized around a few recurring extension patterns.
 
 ### Adding a new channel-level histogram
 
-Use the existing lazy-booking pattern:
+Use the existing prebooking/fallback pattern:
 
 * Add a storage vector.
 * Allocate it in `allocateBuffers()`.
 * Add an `ensure...Booked()` helper.
-* Book only when the channel is seen.
-* Fill only after validating `cidx`.
+* Call the helper from `prebookExpectedStructureFromCaloDAQMap()` if the histogram should exist for all mapped channels.
+* Keep the helper safe for runtime fallback.
+* Fill only after validating `cidx` and after the channel appears in data.
 
 ### Adding a new disk-map mode
 
@@ -1604,7 +1437,7 @@ Use the existing lazy-booking pattern:
 * Pairing assumes adjacent even/odd offline SiPM IDs belong to the same crystal.
 * Reference overlay support is limited to a small set of hard-coded histogram names.
 * `ChannelHealthTrend` is saved but not streamed by default to avoid excessive payload size.
-* Live waveform histograms show the latest representative waveform, not every waveform.
+* Live waveform histograms are prebooked from `CaloDAQMap`, but their bin contents are filled only after the corresponding channel appears in data. Cached live waveform values are flushed to the ROOT file at `endJob()`.
 * Disk-map running means are accumulated over the job and refreshed before streaming and again at `endJob()`.
 * Heuristic thresholds are intended for DQM monitoring and may need adjustment for different run conditions or data-taking modes.
 
@@ -1614,12 +1447,12 @@ Use the existing lazy-booking pattern:
 
 When opening a new output file, check these first:
 
-1. `Global_Histograms/h_dqm_summary` - are the main status checks passing?
-2. `Global_Histograms/h_dqm_run_counters` - were events and digis processed, and are send errors/skips low?
-3. `Global_Histograms/h_occ_sparse` - are expected boards/channels active?
-4. `Global_Histograms/h_issue_board` - are issues localized to specific boards?
-5. `Global_Histograms/h_health_board` - which boards need attention?
-6. `Global_Histograms/h_skip_reason` - are digis being rejected for mapping or waveform-quality reasons?
+1. `<analyzer_label>/Global_Histograms/h_dqm_summary` - are the main status checks passing?
+2. `<analyzer_label>/Global_Histograms/h_dqm_run_counters` - were events and digis processed, and are send errors/skips low?
+3. `<analyzer_label>/Global_Histograms/h_occ_sparse` - are expected boards/channels active?
+4. `<analyzer_label>/Global_Histograms/h_issue_board` - are issues localized to specific boards?
+5. `<analyzer_label>/Global_Histograms/h_health_board` - which boards need attention?
+6. `<analyzer_label>/Global_Histograms/h_skip_reason` - are digis being rejected for mapping or waveform-quality reasons?
 7. Disk maps - are spatial patterns visible on the calorimeter disks?
 8. Board-level matrices - which channels and metrics explain the problem?
 9. Live/first-hit waveforms - do affected channels look physically reasonable?
