@@ -30,11 +30,13 @@ The module does not implement a raw data decoder. It consumes already-produced `
 
 * Read `CaloDigiCollection` from a configurable input module label.
 * Convert each offline `SiPMID` to electronics coordinates using `CaloDAQMap`.
-* Fill global detector summaries for occupancy, baseline, RMS, amplitude, waveform size, pair completeness, waveform health, issue counts, and run counters.
+* Fill global detector summaries for raw and normalized occupancy, baseline, RMS, amplitude, waveform size, pair completeness, waveform health, topology diagnostics, issue counts, and run counters.
 * Fill per-disk `THMu2eCaloDisk` maps for amplitude, crystal sum, left/right asymmetry, baseline, and RMS.
 * Prebook the expected board/channel ROOT structure from `CaloDAQMap` at the start of the first event, while still tracking which channels actually appear in the input data.
 * Treat board `160` as the dedicated laser board and monitor it separately from regular disk boards.
-* Optionally stream selected summary, board, disk-map, live waveform, first-hit waveform, and laser histograms to otsdaq.
+* Select live waveform representatives by highest amplitude per regular SiPM and per laser channel.
+* Build pair/asymmetry quantities from all usable same-event regular SiPM candidates by selecting the best time-matched even/odd SiPM pair.
+* Optionally stream selected summary, normalized occupancy, board, disk-map, live waveform, first-hit waveform, and laser histograms to otsdaq.
 * Optionally overlay a small set of reference histograms when a reference ROOT file is provided. Reference-file overlay support is experimental and intentionally limited. It may be simplified or replaced later if `.rcfg` dashboards with the `superimposed` option become the preferred way to display overlays.
 
 ---
@@ -197,9 +199,26 @@ odd SiPM ID  = partner side
 crystal ID   = sipmId / 2
 ```
 
-For each event, the module stores one representative digi per SiPM. If multiple usable digis appear for the same SiPM in the same event, the representative digi is chosen by highest baseline-subtracted amplitude. This keeps crystal-pair quantities stable while still tracking multiplicity through `h_pair_multiplicity`.
+The module uses two related per-event representations:
 
-Pair-based histograms include left/right amplitude correlation, crystal sum, left/right asymmetry, pair completeness, pair missing fraction, raw-ID delta, and board delta.
+| Representation | Used for |
+| -------------- | -------- |
+| Representative SiPM feature | Live waveform display and selected per-event summaries |
+| Pair candidates | Same-event even/odd pair selection, topology checks, and asymmetry calculations |
+
+For live waveform display, the module keeps one representative digi per regular SiPM and one representative digi per laser channel. If multiple usable digis appear for the same regular SiPM or laser channel in the same event, the representative is chosen by highest baseline-subtracted amplitude. Raw peak ADC and compact channel index are used as tie-breakers.
+
+For pair and asymmetry calculations, the module stores all usable same-event regular SiPM candidates. For each adjacent even/odd SiPM pair, the module selects the best time-matched pair using the following priority:
+
+1. Prefer pairs where both amplitudes are positive.
+2. Prefer the smallest peak-time difference between the two sides.
+3. Prefer the smallest average peak-time residual relative to `kExpectedPeakTick`.
+4. Prefer the larger amplitude sum.
+5. Prefer the larger combined SNR.
+
+After selecting a pair, the module checks that both sides map to the same disk. If the selected even/odd pair maps across different disks, the module records `PairDiskMismatch`, sets `PairOK = 0` for both sides, applies the mild pair-quality health penalty to both sides, and skips the asymmetry calculation for that crystal.
+
+Pair-based histograms include left/right amplitude correlation, crystal sum, left/right asymmetry, pair completeness, pair-missing fraction, raw-ID delta, board delta, and same-event SiPM multiplicity.
 
 Pair quantities are only filled after the full event has been scanned, because both sides of a crystal may appear at different positions in the `CaloDigiCollection`.
 
@@ -268,7 +287,7 @@ Intermediate values can appear in profile histograms because bins are averaged o
 | `SaturationOK`   | Waveform has no saturated samples                     |
 | `SNRGood`        | `amp / RMS >= 5`, when RMS is positive                |
 | `PeakTimeOK`     | Peak is not on the waveform edge                      |
-| `PairOK`         | Partner SiPM is present in the same event             |
+| `PairOK`         | Valid adjacent even/odd partner exists and the selected pair maps to the same disk |
 | `WaveformHealth` | `1 - badness`, where badness combines waveform issues |
 
 ### Issue types
@@ -283,7 +302,8 @@ Issue types are counted when a problem is detected:
 | `LowSNR`   | Signal-to-noise ratio is below threshold  |
 | `NegAmp`   | Baseline-subtracted amplitude is negative |
 | `BadShape` | Pulse-shape roughness score is high       |
-| `PairMiss` | Partner SiPM is missing                   |
+| `PairMiss`         | Adjacent even/odd partner SiPM is missing in the event |
+| `PairDiskMismatch` | Adjacent even/odd partner candidates exist, but the selected pair maps across different disks |
 
 ### Health score
 
@@ -304,7 +324,7 @@ Current badness contributions:
 | Negative amplitude |               `0.20` |
 | Bad pulse shape    |               `0.20` |
 
-A missing pair is treated as a mild health penalty through `kPairMissHealth = 0.75`.
+A missing pair is treated as a mild health penalty through `kPairMissHealth = 0.75`. A selected even/odd pair that maps across different disks is also treated as a pair-quality problem: both sides receive `PairOK = 0`, both sides receive the mild health penalty, and the asymmetry calculation is skipped for that crystal.
 
 Example:
 
@@ -394,23 +414,23 @@ The main status components are computed conceptually as:
 ```text
 HasEvents     = 1
 HasDigis      = 1 if current event has at least one CaloDigi, else 0
-PairComplete  = 1 - min(1, nUnpairedSipms / nRepresentativeSipms)
+PairComplete  = 1 - min(1, (nUnpairedSipms + 2*nPairDiskMismatches) / nPairCandidateSipms)
 SaturationOK  = 1 - min(1, nSatWaveforms / nHealthSamples)
 RMS_OK        = 1 - min(1, nHighRms / nHealthSamples)
 LaserSeen     = 1 if positive laser amplitude was accepted, else 0
 DetLaserRatio = 1 if detector amplitude and laser amplitude are both available, else 0
-HealthOK      = mean event health score, including waveform-health entries and mild pair-miss health penalty entries
+HealthOK      = mean event health score, including waveform-health entries and mild pair-quality penalty entries
 Overall       = average of the main status quantities
 ```
 `LaserSeen` and `DetLaserRatio` can be `0` in data-taking modes where laser digis are not expected; in that case, they should not be interpreted as detector failures, and `Overall` should be interpreted with the run mode in mind.
 
-If no representative SiPMs are available, PairComplete is set to 1.0. If no health samples are available, SaturationOK, RMS_OK, and HealthOK are set to 1.0. LaserSeen and DetLaserRatio are set to 0.0 unless positive accepted laser amplitude is available.
+If no pair-candidate SiPMs are available, `PairComplete` is set to `1.0`. If no health samples are available, `SaturationOK`, `RMS_OK`, and `HealthOK` are set to `1.0`. `LaserSeen` and `DetLaserRatio` are set to `0.0` unless positive accepted laser amplitude is available.
 
 Overall includes the laser-related status bins, so runs without expected laser data can have a reduced Overall value even when regular calorimeter data are healthy.
 
-In the current implementation, `nHealthSamples` includes waveform-health entries and mild pair-miss health penalty entries. 
+In the current implementation, `nHealthSamples` includes waveform-health entries and mild pair-quality penalty entries. 
 
-Implementation caveat: the current summary calculation uses a shared health-sample denominator. As a result, pair-miss penalty entries can affect the denominator used by `SaturationOK` and `RMS_OK`. These bins should therefore be interpreted as compact operational indicators rather than independent physics-quality efficiencies.
+Implementation caveat: the current summary calculation uses a shared health-sample denominator. As a result, pair-quality penalty entries can affect the denominator used by `SaturationOK` and `RMS_OK`. These bins should therefore be interpreted as compact operational indicators rather than independent physics-quality efficiencies.
 
 Important interpretation detail:
 
@@ -432,7 +452,7 @@ Important interpretation detail:
 |   5 | `RMS_OK`        | Fraction-like score for waveforms with acceptable RMS                     |
 |   6 | `LaserSeen`     | At least one accepted positive-amplitude laser digi was seen in the event |
 |   7 | `DetLaserRatio` | Detector/laser amplitude ratio was available for the event                |
-|   8 | `HealthOK`      | Mean event health score: waveform health and mild pair-miss health penalties |
+|   8 | `HealthOK`      | Mean event health score: waveform health and mild pair-quality penalties  |
 |   9 | `Overall`       | Average of the main status quantities                                     |
 
 The summary values are bounded between `0` and `1`:
@@ -528,7 +548,9 @@ h_health_board
 h_health_block
 h_issue_board
 h_occ_sparse
+h_occ_sparse_norm
 h_occ_dense
+h_occ_dense_norm
 h_base_sparse
 h_base_dense
 h_rms_sparse
@@ -539,6 +561,7 @@ h_max_sparse
 h_max_dense
 h_asym
 h_board_vs_channel
+h_board_vs_channel_norm
 h_occ_board
 h_occ_board_norm
 g_nhits_ewt
@@ -566,6 +589,7 @@ Disk0/
 +-- Board_027/
     +-- Histograms/
     |   +-- D0_B027_Occupancy
+    |   +-- D0_B027_OccupancyNorm
     |   +-- D0_B027_Baseline
     |   +-- D0_B027_RMS
     |   +-- D0_B027_Max
@@ -596,6 +620,7 @@ Laser/
 +-- Board_160/
     +-- Histograms/
     |   +-- B160_Occupancy
+    |   +-- B160_OccupancyNorm
     |   +-- B160_Baseline
     |   +-- B160_RMS
     |   +-- B160_Max
@@ -619,13 +644,14 @@ Not every ROOT histogram is streamed online. This is intentional.
 | Histogram category    | Saved to ROOT | Streamed online | Notes |
 | --------------------- | ------------- | --------------- | ----- |
 | Global summaries      | Yes | Yes, if `sendHists=true` and `freqDQM > 0` | Core DQM status and global diagnostics |
-| Board summaries       | Yes | Yes, if `sendHists=true`, `freqDQM > 0`, and boards were updated | Only active/updated boards are sent |
+| Normalized occupancy  | Yes | Yes, if `sendHists=true` and `freqDQM > 0` | Normalized occupancy histograms are streamed; raw occupancy histograms are still saved |
+| Board summaries       | Yes | Yes, if `sendHists=true`, `freqDQM > 0`, and boards were updated | Only active/updated boards are sent; normalized board occupancy is streamed |
 | Channel distributions | Yes | No by default | Prebooked from `CaloDAQMap`; filled only after the channel appears |
 | Live waveforms        | Yes | Yes, if `sendHists=true`, `freqWaveforms > 0`, and channels were updated | Prebooked from `CaloDAQMap`; filled only after the channel appears |
 | First-hit waveforms   | Yes | Yes, if `sendHists=true` and `freqWaveforms > 0` | Created after the first observed hit and sent once on a waveform streaming cadence |
 | Disk maps             | Yes | Yes, if `sendHists=true`, `enableDiskMaps=true`, `freqDQM > 0`, and the disk-map cadence is reached | Controlled by `enableDiskMaps` and `diskCombines` |
 | Board health trends   | Yes | No by default | Large payload; saved for offline inspection |
-| Laser board summaries | Yes | Yes, if `sendHists=true`, `freqDQM > 0`, and the laser board was updated | Board 160 only |
+| Laser board summaries | Yes | Yes, if `sendHists=true`, `freqDQM > 0`, and the laser board was updated | Board 160 only; normalized laser occupancy is streamed |
 | Reference overlays    | Loaded optionally into memory | Narrow supported subset | See reference section |
 
 ---
@@ -708,8 +734,11 @@ These are the first histograms to check during online running.
 | Histogram                       | Purpose                                                                       |
 | ------------------------------- | ----------------------------------------------------------------------------- |
 | `h_occ_sparse`                  | Full-detector occupancy using readable sparse encoding `boardID*100 + chanID` |
+| `h_occ_sparse_norm`             | Normalized sparse occupancy; streamed instead of raw sparse occupancy         |
 | `h_occ_dense`                   | Full-detector occupancy using compact dense encoding `boardID*20 + chanID`    |
+| `h_occ_dense_norm`              | Normalized dense occupancy; streamed instead of raw dense occupancy           |
 | `h_board_vs_channel`            | Board/channel occupancy heatmap, including laser board 160                    |
+| `h_board_vs_channel_norm`       | Normalized board/channel occupancy heatmap; streamed instead of the raw heatmap |
 | `h_base_sparse`, `h_base_dense` | Mean baseline by encoded channel                                              |
 | `h_rms_sparse`, `h_rms_dense`   | Mean baseline RMS by encoded channel                                          |
 | `h_amp_sparse`, `h_amp_dense`   | Mean baseline-subtracted amplitude by encoded channel                         |
@@ -765,20 +794,20 @@ Event blocks use `kEventBlockSize = 100` events per block.
 
 ### Pair and topology histograms
 
-| Histogram                | Purpose                                                |
-| ------------------------ | ------------------------------------------------------ |
-| `h_pair_ok_board`        | Fraction of SiPMs with partner present by board        |
-| `h_unpaired_evt`         | Number of unpaired SiPMs per event                     |
-| `h_pair_miss_frac_block` | Pair-missing fraction vs event block                   |
-| `h_pair_raw_delta`       | Difference between odd-side and even-side raw IDs      |
-| `h_pair_board_delta`     | Difference between odd-side and even-side board IDs    |
+| Histogram                | Purpose |
+| ------------------------ | ------- |
+| `h_pair_ok_board`        | Fraction of SiPMs with a valid same-disk adjacent even/odd partner by board |
+| `h_unpaired_evt`         | Number of regular SiPMs whose adjacent even/odd partner candidate was missing in the event |
+| `h_pair_miss_frac_block` | Pair-missing fraction vs event block |
+| `h_pair_raw_delta`       | Difference between odd-side and even-side raw IDs |
+| `h_pair_board_delta`     | Difference between odd-side and even-side board IDs |
 | `h_pair_multiplicity`    | Maximum usable digi multiplicity per side of a crystal |
-| `h_lr_corr`              | Left amplitude vs right amplitude                      |
-| `h_sum_asym`             | Crystal sum amplitude vs left/right asymmetry          |
-| `h_asym`                 | Left/right asymmetry distribution                      |
-| `h_asym_board`           | Mean left/right asymmetry by board                     |
+| `h_lr_corr`              | Left amplitude vs right amplitude |
+| `h_sum_asym`             | Crystal sum amplitude vs left/right asymmetry |
+| `h_asym`                 | Left/right asymmetry distribution |
+| `h_asym_board`           | Mean left/right asymmetry by board |
 
-These histograms are useful for finding mapping issues, missing partners, unexpected board transitions, left/right imbalance, or repeated digis in the same event.
+These histograms are useful for finding missing partners, cross-disk pair mismatches, unexpected board transitions, left/right imbalance, mapping issues, or repeated digis in the same event.
 
 ### Disk maps
 
@@ -807,6 +836,7 @@ Each mapped regular board can be prebooked with:
 | Histogram                    | Purpose                              |
 | ---------------------------- | ------------------------------------ |
 | `D*_B*_Occupancy`            | Per-channel occupancy on the board   |
+| `D*_B*_OccupancyNorm`        | Normalized per-channel occupancy on the board |
 | `D*_B*_Baseline`             | Mean baseline by channel             |
 | `D*_B*_RMS`                  | Mean RMS by channel                  |
 | `D*_B*_Max`                  | Mean raw peak ADC by channel         |
@@ -840,6 +870,7 @@ Laser board `160` is monitored separately:
 | Histogram                   | Purpose                                                       |
 | --------------------------- | ------------------------------------------------------------- |
 | `B160_Occupancy`            | Laser channel occupancy                                       |
+| `B160_OccupancyNorm`        | Normalized laser channel occupancy                            |
 | `B160_Baseline`             | Mean laser baseline by channel                                |
 | `B160_RMS`                  | Mean laser RMS by channel                                     |
 | `B160_Max`                  | Mean laser raw peak ADC by channel                            |
@@ -991,7 +1022,7 @@ ref_D0_B027_C00_Waveform
 
 Reference histograms are cloned into memory with `SetDirectory(nullptr)` so the input file can close safely.
 
-Current limitation: reference streaming is intentionally narrow and mostly demonstrates overlays for global dense profiles and one example board/channel: Disk 0, Board 27, Channel 0.
+Current limitation: reference streaming is intentionally narrow. It currently demonstrates selected global dense-profile overlays and one example board/channel: Disk 0, Board 27, Channel 0. `ref_h_occ_dense` is loaded into memory but is not streamed unless the commented `addHist()` line in `streamIfScheduled()` is restored.
 
 ---
 
@@ -1009,6 +1040,7 @@ Rejected digis and skipped derived calculations are counted in `h_skip_reason` a
 | `PeakPosOutOfRange`      | Peak position is outside waveform bounds                   |
 | `NonFiniteBaselineOrRms` | Baseline or RMS is not finite                              |
 | `TinyDenomAsym`          | `L + R` is too small for stable asymmetry calculation      |
+| `PairDiskMismatch`       | Selected adjacent even/odd SiPM pair maps across different disks |
 
 Overflow-style counters are stored in `h_dqm_run_counters`:
 
@@ -1030,7 +1062,7 @@ Overflow-style counters are stored in `h_dqm_run_counters`:
 | `MappedDisk1Digis`     | Total regular digis mapped/classified to Disk 1               |
 | `MappedLaserDigis`     | Total digis mapped/classified to laser board 160              |
 | `SkippedTotal`         | Total skip/diagnostic counts, including rejected digis and skipped derived calculations  |
-| `UnpairedThisEvent`    | Number of unpaired representative SiPMs in the current event  |
+| `UnpairedThisEvent`    | Number of regular SiPMs whose adjacent even/odd partner candidate was missing in the current event |
 | `TotalSendErrors`      | Total histogram streaming send failures                       |
 | `EvtDigisOverflow`     | Number of events exceeding the `h_evt_digis` display range    |
 | `WaveformSizeOverflow` | Number of waveforms exceeding the waveform-size display range |
@@ -1044,13 +1076,15 @@ These counters are useful for fast sanity checks and for distinguishing detector
 
 At the end of the job, the module:
 
-1. Flushes all cached regular live waveforms to their ROOT histograms.
-2. Flushes all cached laser live waveforms to their ROOT histograms.
-3. Refreshes all disk maps.
-4. Prints a summary of processed events, mapped disk/laser digis, invalid regular mappings, send errors, out-of-range SiPM IDs, and skip counts.
-5. Prints a waveform-size summary for regular channels.
-6. Prints a waveform-size summary for laser channels.
-7. Reports the top variable-size waveform channels, sorted by number of waveform-size transitions.
+1. Flushes the final averaged `g_nhits_ewt` point.
+2. Flushes all cached regular live waveforms to their ROOT histograms.
+3. Flushes all cached laser live waveforms to their ROOT histograms.
+4. Refreshes all disk maps.
+5. Updates normalized occupancy histograms from the raw occupancy histograms.
+6. Prints a summary of processed events, mapped disk/laser digis, invalid regular mappings, send errors, out-of-range SiPM IDs, and skip counts.
+7. Prints a waveform-size summary for regular channels.
+8. Prints a waveform-size summary for laser channels.
+9. Reports the top variable-size waveform channels, sorted by number of waveform-size transitions.
 
 This makes the output ROOT file complete even when live waveform streaming was disabled or did not occur on the final event.
 
@@ -1065,6 +1099,8 @@ The module avoids unnecessary memory and network overhead through several design
 * Per-event SiPM state uses stamp-based validity instead of clearing large vectors every event.
 * Live waveforms are cached in fixed-size arrays of `64` bins.
 * Streaming queues use flags to avoid duplicate growth between send attempts.
+* Pair/asymmetry calculations keep all usable same-event candidates only for the current event, while live waveform display keeps one representative per SiPM/channel.
+* Normalized occupancy histograms are rebuilt from raw occupancy histograms only when needed for streaming and at `endJob()`.
 * Only updated boards and updated waveform channels are streamed.
 * Disk maps are streamed less frequently than normal summaries.
 * Large board health-trend histograms are written to ROOT but not streamed by default.
@@ -1081,6 +1117,7 @@ entry is valid for current event if storedStamp == pairStamp_
 This pattern is used for:
 
 * representative SiPM features,
+* same-event regular SiPM pair candidates,
 * paired-crystal state,
 * per-event SiPM multiplicity.
 
@@ -1112,8 +1149,10 @@ Core DQM status objects:
 
 Useful global occupancy objects:
 
-* `h_occ_sparse` - full-detector occupancy using sparse encoded channel ID
-* `h_board_vs_channel` - board/channel occupancy heatmap
+* `h_occ_sparse_norm` - normalized full-detector occupancy using sparse encoded channel ID
+* `h_board_vs_channel_norm` - normalized board/channel occupancy heatmap
+
+The raw versions, `h_occ_sparse` and `h_board_vs_channel`, are saved to the ROOT file. The normalized versions are used for online streaming.
 
 This dashboard answers:
 
@@ -1163,7 +1202,7 @@ h_pair_board_delta
 h_pair_miss_frac_block
 h_pair_ok_board
 h_pair_multiplicity
-h_board_vs_channel
+h_board_vs_channel_norm
 h_skip_reason
 ```
 
@@ -1177,10 +1216,10 @@ This dashboard answers:
 
 ### Laser monitoring dashboard
 
-Use this when checking laser data and detector/laser normalization:
+Use this when checking laser data and detector/laser normalization. In the ROOT output file, useful objects include:
 
 ```text
-<analyzer_label>/Laser/Board_160/Histograms/B160_Occupancy
+<analyzer_label>/Laser/Board_160/Histograms/B160_OccupancyNorm
 <analyzer_label>/Laser/Board_160/Histograms/B160_Baseline
 <analyzer_label>/Laser/Board_160/Histograms/B160_RMS
 <analyzer_label>/Laser/Board_160/Histograms/B160_Max
@@ -1458,7 +1497,7 @@ Use the existing prebooking/fallback pattern:
 ## Current limitations
 
 * The detector geometry is hard-coded for 2 disks, 80 regular boards per disk, 20 channels per board, and laser board 160.
-* Pairing assumes adjacent even/odd offline SiPM IDs belong to the same crystal.
+* Pairing assumes adjacent even/odd offline SiPM IDs belong to the same crystal. If the selected adjacent pair maps across different disks, the module records `PairDiskMismatch` and skips the asymmetry for that crystal.
 * Reference overlay support is limited to a small set of hard-coded histogram names.
 * `ChannelHealthTrend` is saved but not streamed by default to avoid excessive payload size.
 * Live waveform histograms are prebooked from `CaloDAQMap`, but their bin contents are filled only after the corresponding channel appears in data. Cached live waveform values are flushed to the ROOT file at `endJob()`.
