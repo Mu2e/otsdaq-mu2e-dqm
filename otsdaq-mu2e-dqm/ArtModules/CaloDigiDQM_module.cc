@@ -21,6 +21,12 @@
 //   - reference histograms are optional; missing reference files or objects do not
 //     stop the module
 //   - live waveform streaming is update-driven to reduce network load
+//   - live waveform representatives are selected by highest amplitude per regular SiPM
+//     and per laser channel
+//   - pair/asymmetry calculations use all same-event regular SiPM candidates and select the
+//     best time-matched even/odd SiPM pair
+//   - normalized occupancy histograms are streamed; raw occupancy histograms are
+//     still saved to the ROOT file
 ////////////////////////////////////////////////////////////////////////////////////
 #include "Offline/CaloConditions/inc/CaloDAQMap.hh"
 #include "Offline/ProditionsService/inc/ProditionsHandle.hh"
@@ -172,7 +178,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 	{
 		// otsdaq destination and top-level namespace for streamed histograms
 		fhicl::Atom<std::string> address{fhicl::Name("address"),
-		                                 "mu2edaq11-data.fnal.gov"};
+		                                 "mu2e-dl-01-data.fnal.gov"};
 		fhicl::Atom<int>         port{fhicl::Name("port"), 6000};
 		fhicl::Atom<std::string> moduleTag{fhicl::Name("moduleTag"), "CaloDigiDQM"};
 		fhicl::Atom<bool>        sendHists{fhicl::Name("sendHists"), false};
@@ -186,7 +192,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 		// art input tag label for the CaloDigiCollection
 		fhicl::Atom<std::string> caloDigiModuleLabel{fhicl::Name("caloDigiModuleLabel"),
-		                                             "CaloDigi"};
+		                                             "CaloDigisFromDTCEvents"};
 
 		// Disk maps are always saved to the ROOT file.
 		// This flag controls disk-map streaming only.
@@ -416,6 +422,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 		PeakPosOutOfRange,
 		NonFiniteBaselineOrRms,
 		TinyDenomAsym,
+		PairDiskMismatch,
 		Count
 	};
 
@@ -507,6 +514,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 		NegAmp,
 		BadShape,
 		PairMiss,
+		PairDiskMismatch,
 		Count
 	};
 
@@ -528,6 +536,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 			return "BadShape";
 		case IssueType::PairMiss:
 			return "PairMiss";
+		case IssueType::PairDiskMismatch:
+			return "PairDiskMismatch";
 		case IssueType::Count:
 			break;
 		}
@@ -554,6 +564,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 			return "NonFiniteBaselineOrRms";
 		case SkipReason::TinyDenomAsym:
 			return "TinyDenomAsym";
+		case SkipReason::PairDiskMismatch:
+			return "PairDiskMismatch";
 		case SkipReason::Count:
 			break;
 		}
@@ -665,6 +677,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 		int nLowSnr{0};
 		int nNegativeAmp{0};
 		int nUnpairedSipms{0};
+		int nPairDiskMismatches{0};
 
 		double sumHealth{0.0};
 		int    nHealthSamples{0};
@@ -687,11 +700,16 @@ class CaloDigiDQM : public art::EDAnalyzer
 		double baseline{0.0};
 		double rms{0.0};
 		double ampRaw{0.0};
-		int    rawId{-1};
-		int    disk{-1};
-		int    board{-1};
-		int    chan{-1};
-		int    cidx{-1};
+
+		int    peakpos{-1};
+		double timeResid{0.0};
+		double snr{0.0};
+
+		int rawId{-1};
+		int disk{-1};
+		int board{-1};
+		int chan{-1};
+		int cidx{-1};
 
 		// Representative baseline-subtracted waveform used only for live waveform display.
 		int                               wfN{0};
@@ -735,13 +753,32 @@ class CaloDigiDQM : public art::EDAnalyzer
 	                      EventStats&        stats,
 	                      int                eventBlock);
 
-	void   processRegularDigi(CaloDigi const&    digi,
-	                          DigiAddress const& addr,
-	                          EventStats&        stats,
-	                          int                eventBlock);
-	void   processPairs(EventStats& stats, int eventBlock);
-	void   queueRepresentativeWaveformsForStreaming();
-	void   queueRepresentativeLaserWaveformsForStreaming();
+	void processRegularDigi(CaloDigi const&    digi,
+	                        DigiAddress const& addr,
+	                        EventStats&        stats,
+	                        int                eventBlock);
+	void processPairs(EventStats& stats, int eventBlock);
+
+	// Live waveform representatives use the highest-amplitude digi per regular SiPM
+	// and per laser channel. Pair/asymmetry calculations use all usable same-event
+	// regular SiPM candidates and select the best time-matched even/odd pair separately.
+	void queueRepWaveformsForStreaming();
+	void queueRepLaserWaveformsForStreaming();
+
+	bool pairCandidateSeen(int sid) const
+	{
+		return (sid >= 0 && sid < kMaxSipmIdForMaps_ &&
+		        pairCandidateStamp_[(size_t)sid] == pairStamp_ &&
+		        !pairCandidates_[(size_t)sid].empty());
+	}
+
+	void addPairCandidate(int sid, SipmFeat const& f);
+
+	bool selectBestTimeMatchedPair(int       evenId,
+	                               int       oddId,
+	                               SipmFeat& bestEven,
+	                               SipmFeat& bestOdd) const;
+
 	double fillLaserNormalization(EventStats& stats, int eventBlock);
 	void   fillDqmSummary(EventStats const& stats, int eventBlock, double meanLaserAmp);
 	void   streamIfScheduled();
@@ -766,6 +803,8 @@ class CaloDigiDQM : public art::EDAnalyzer
 	    int boardID, int chanID, QualityMetric metric, double value, int eventBlock);
 
 	void fillBoardIssueMetric(int boardID, int chanID, IssueType issue);
+
+	void updateNormalizedOccHistograms();
 
 	// -----------------------
 	// Feature extraction helpers
@@ -1232,6 +1271,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 	struct BoardHists
 	{
 		TH1F*     occ{nullptr};
+		TH1F*     occNorm{nullptr};
 		TProfile* base{nullptr};
 		TProfile* rms{nullptr};
 		TProfile* max{nullptr};
@@ -1267,6 +1307,12 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 	TProfile* h_pair_ok_board_{nullptr};
 	TH1I*     h_unpaired_evt_{nullptr};
+
+	// Unlike feat_, pairCandidates_ stores all usable regular digis for each SiPM
+	// in the current event. This is used for time-matched L/R pairing and asymmetry.
+	std::vector<std::vector<SipmFeat>> pairCandidates_;
+	std::vector<int>                   pairCandidateStamp_;
+	std::vector<int>                   pairCandidateSipmIds_;
 
 	TProfile2D* h_badness_board_channel_{nullptr};
 
@@ -1419,8 +1465,11 @@ class CaloDigiDQM : public art::EDAnalyzer
 	TProfile* h_amp_sparse_{nullptr};
 	TProfile* h_amp_dense_{nullptr};
 	TH1F*     h_occupancy_sparse_{nullptr};
-	TH1F*     h_occupancy_dense_{nullptr};
-	TH1I*     h_pair_multiplicity_{nullptr};
+	TH1F*     h_occupancy_sparse_norm_{nullptr};
+
+	TH1F* h_occupancy_dense_{nullptr};
+	TH1F* h_occupancy_dense_norm_{nullptr};
+	TH1I* h_pair_multiplicity_{nullptr};
 
 	TProfile* h_baseline_sparse_{nullptr};
 	TProfile* h_baseline_dense_{nullptr};
@@ -1435,6 +1484,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 	TH2I* h_global_board_vs_channel_{nullptr};
 	TH2F* h_global_waveform_density_{nullptr};
+	TH2F* h_global_board_vs_channel_norm_{nullptr};
 
 	TH1F* h_waveform_size_{nullptr};
 
@@ -1685,6 +1735,9 @@ void CaloDigiDQM::allocateBuffers()
 	feat_.assign((size_t)kMaxSipmIdForMaps_, SipmFeat{});
 	featStamp_.assign((size_t)kMaxSipmIdForMaps_, 0);
 	pairedStamp_.assign((size_t)kMaxCrystalIdForMaps_, 0);
+	pairCandidates_.resize((size_t)kMaxSipmIdForMaps_);
+	pairCandidateStamp_.assign((size_t)kMaxSipmIdForMaps_, 0);
+	pairCandidateSipmIds_.reserve(kMaxSipmIdForMaps_);
 	sipmMultiplicity_.assign((size_t)kMaxSipmIdForMaps_, 0u);
 	sipmMultiplicityStamp_.assign((size_t)kMaxSipmIdForMaps_, 0);
 
@@ -1836,6 +1889,21 @@ void CaloDigiDQM::bookGlobalHistograms()
 	h_global_board_vs_channel_->GetXaxis()->SetTitle("Board ID");
 	h_global_board_vs_channel_->GetYaxis()->SetTitle("Channel ID");
 
+	h_global_board_vs_channel_norm_ = globalDir_->make<TH2F>(
+	    "h_board_vs_channel_norm",
+	    "Normalized Board vs Channel Occupancy (All Disks + Laser)",
+	    161,
+	    0,
+	    161,
+	    20,
+	    0,
+	    20);
+	h_global_board_vs_channel_norm_->GetXaxis()->SetTitle("Board ID");
+	h_global_board_vs_channel_norm_->GetYaxis()->SetTitle("Channel ID");
+	h_global_board_vs_channel_norm_->GetZaxis()->SetTitle("Fraction of hits");
+	h_global_board_vs_channel_norm_->SetStats(0);
+	h_global_board_vs_channel_norm_->SetOption("COLZ");
+
 	h_global_waveform_density_ =
 	    globalDir_->make<TH2F>("h_waveform_density",
 	                           "Waveform Density (all valid digis)",
@@ -1939,9 +2007,9 @@ void CaloDigiDQM::bookGlobalHistograms()
 	h_sum_asym_->GetYaxis()->SetTitle("(L - R)/(L + R)");
 
 	h_pair_ok_board_ = globalDir_->make<TProfile>(
-	    "h_pair_ok_board", "Pair Completeness vs Board", 161, 0, 161);
+	    "h_pair_ok_board", "Valid Same-Disk Pair Completeness vs Board", 161, 0, 161);
 	h_pair_ok_board_->GetXaxis()->SetTitle("Board ID");
-	h_pair_ok_board_->GetYaxis()->SetTitle("Fraction with partner");
+	h_pair_ok_board_->GetYaxis()->SetTitle("Fraction with valid same-disk partner");
 	styleStatusProfile(h_pair_ok_board_);
 
 	h_unpaired_evt_ =
@@ -2234,6 +2302,18 @@ void CaloDigiDQM::bookGlobalHistograms()
 	h_occupancy_sparse_->GetXaxis()->SetTitle("Encoded Channel (boardID*100 + chanID)");
 	h_occupancy_sparse_->GetYaxis()->SetTitle("Hit Count");
 
+	h_occupancy_sparse_norm_ = globalDir_->make<TH1F>(
+	    "h_occ_sparse_norm",
+	    "Normalized Occupancy (Sparse Encoding, All Disks + Laser)",
+	    axisSparse.nBins,
+	    axisSparse.xMin,
+	    axisSparse.xMax);
+	h_occupancy_sparse_norm_->GetXaxis()->SetTitle(
+	    "Encoded Channel (boardID*100 + chanID)");
+	h_occupancy_sparse_norm_->GetYaxis()->SetTitle("Fraction of hits");
+	h_occupancy_sparse_norm_->SetStats(0);
+	h_occupancy_sparse_norm_->SetLineWidth(2);
+
 	h_occupancy_dense_ =
 	    globalDir_->make<TH1F>("h_occ_dense",
 	                           "Occupancy (Dense Encoding, All Disks + Laser)",
@@ -2242,6 +2322,18 @@ void CaloDigiDQM::bookGlobalHistograms()
 	                           axisDense.xMax);
 	h_occupancy_dense_->GetXaxis()->SetTitle("Encoded Channel (boardID*20 + chanID)");
 	h_occupancy_dense_->GetYaxis()->SetTitle("Hit Count");
+
+	h_occupancy_dense_norm_ =
+	    globalDir_->make<TH1F>("h_occ_dense_norm",
+	                           "Normalized Occupancy (Dense Encoding, All Disks + Laser)",
+	                           axisDense.nBins,
+	                           axisDense.xMin,
+	                           axisDense.xMax);
+	h_occupancy_dense_norm_->GetXaxis()->SetTitle(
+	    "Encoded Channel (boardID*20 + chanID)");
+	h_occupancy_dense_norm_->GetYaxis()->SetTitle("Fraction of hits");
+	h_occupancy_dense_norm_->SetStats(0);
+	h_occupancy_dense_norm_->SetLineWidth(2);
 
 	auto makeGlobalProfile = [&](const char*       name,
 	                             const char*       title,
@@ -2554,6 +2646,17 @@ void CaloDigiDQM::ensureLaserBoardBooked()
 		laserBoardH_.occ->GetXaxis()->SetTitle("Channel ID");
 		laserBoardH_.occ->GetYaxis()->SetTitle("Count");
 
+		laserBoardH_.occNorm =
+		    histosDir.make<TH1F>("B160_OccupancyNorm",
+		                         "Normalized Occupancy for Laser Board 160",
+		                         kLaserChannels,
+		                         0,
+		                         kLaserChannels);
+		laserBoardH_.occNorm->GetXaxis()->SetTitle("Channel ID");
+		laserBoardH_.occNorm->GetYaxis()->SetTitle("Fraction of laser hits");
+		laserBoardH_.occNorm->SetStats(0);
+		laserBoardH_.occNorm->SetLineWidth(2);
+
 		laserBoardH_.base = histosDir.make<TProfile>("B160_Baseline",
 		                                             "Baseline for Laser Board 160",
 		                                             kLaserChannels,
@@ -2720,6 +2823,23 @@ void CaloDigiDQM::ensureBoardBooked(int disk, int boardID)
 
 		bh.occ = histosDir.make<TH1F>(
 		    occName.Data(), occTitle.Data(), kChannelsPerBoard, 0, kChannelsPerBoard);
+
+		bh.occ->GetXaxis()->SetTitle("Channel ID");
+		bh.occ->GetYaxis()->SetTitle("Hit Count");
+
+		TString occNormName  = Form("D%d_B%03d_OccupancyNorm", disk, boardID);
+		TString occNormTitle = Form("Normalized Occupancy for D%d B%03d", disk, boardID);
+
+		bh.occNorm = histosDir.make<TH1F>(occNormName.Data(),
+		                                  occNormTitle.Data(),
+		                                  kChannelsPerBoard,
+		                                  0,
+		                                  kChannelsPerBoard);
+
+		bh.occNorm->GetXaxis()->SetTitle("Channel ID");
+		bh.occNorm->GetYaxis()->SetTitle("Fraction of board hits");
+		bh.occNorm->SetStats(0);
+		bh.occNorm->SetLineWidth(2);
 
 		TString baseName  = Form("D%d_B%03d_Baseline", disk, boardID);
 		TString baseTitle = Form("Baseline for D%d B%03d", disk, boardID);
@@ -3113,12 +3233,14 @@ void CaloDigiDQM::beginEvent()
 		std::fill(featStamp_.begin(), featStamp_.end(), 0);
 		std::fill(pairedStamp_.begin(), pairedStamp_.end(), 0);
 		std::fill(sipmMultiplicityStamp_.begin(), sipmMultiplicityStamp_.end(), 0);
+		std::fill(pairCandidateStamp_.begin(), pairCandidateStamp_.end(), 0);
 		pairStamp_ = 1;
 	}
 
 	repSipmIds_.clear();
 	repLaserChannels_.clear();
 	laserRepSeen_.fill(0u);
+	pairCandidateSipmIds_.clear();
 }
 
 void CaloDigiDQM::accumulateHitsAverage(double eventNumber, int nHits)
@@ -3304,8 +3426,8 @@ void CaloDigiDQM::analyze(art::Event const& event)
 		processDigi(digi, calodaqconds, stats, eventBlock);
 
 	processPairs(stats, eventBlock);
-	queueRepresentativeWaveformsForStreaming();
-	queueRepresentativeLaserWaveformsForStreaming();
+	queueRepWaveformsForStreaming();
+	queueRepLaserWaveformsForStreaming();
 
 	const double meanLaserAmp = fillLaserNormalization(stats, eventBlock);
 	fillDqmSummary(stats, eventBlock, meanLaserAmp);
@@ -3313,6 +3435,21 @@ void CaloDigiDQM::analyze(art::Event const& event)
 	++eventCounter_;
 
 	streamIfScheduled();
+}
+
+// Build normalized occupancy views for streaming.
+// Raw occupancy histograms remain filled and saved to the ROOT file.
+void CaloDigiDQM::updateNormalizedOccHistograms()
+{
+	updateNormalizedHist(h_occ_board_, h_occ_board_norm_);
+	updateNormalizedHist(h_occupancy_sparse_, h_occupancy_sparse_norm_);
+	updateNormalizedHist(h_occupancy_dense_, h_occupancy_dense_norm_);
+	updateNormalizedHist(h_global_board_vs_channel_, h_global_board_vs_channel_norm_);
+
+	for(auto& bh : boardH_)
+		updateNormalizedHist(bh.occ, bh.occNorm);
+
+	updateNormalizedHist(laserBoardH_.occ, laserBoardH_.occNorm);
 }
 
 void CaloDigiDQM::processDigi(CaloDigi const&   digi,
@@ -3454,15 +3591,18 @@ void CaloDigiDQM::processLaserDigi(CaloDigi const&    digi,
 	}
 
 	SipmFeat cand{};
-	cand.amp      = feat.amp;
-	cand.baseline = feat.baseline;
-	cand.rms      = feat.rms;
-	cand.ampRaw   = feat.ampRaw;
-	cand.rawId    = rawId;
-	cand.disk     = -1;
-	cand.board    = kLaserBoardID;
-	cand.chan     = chanID;
-	cand.cidx     = -1;
+	cand.amp       = feat.amp;
+	cand.baseline  = feat.baseline;
+	cand.rms       = feat.rms;
+	cand.ampRaw    = feat.ampRaw;
+	cand.peakpos   = feat.peakpos;
+	cand.timeResid = feat.timeResid;
+	cand.snr       = (feat.rms > 0.0) ? feat.amp / feat.rms : 0.0;
+	cand.rawId     = rawId;
+	cand.disk      = -1;
+	cand.board     = kLaserBoardID;
+	cand.chan      = chanID;
+	cand.cidx      = -1;
 
 	packRepWaveform(cand, waveform, feat.baseline, wfSize);
 
@@ -3663,20 +3803,25 @@ void CaloDigiDQM::processRegularDigi(CaloDigi const&    digi,
 	}
 
 	SipmFeat cand{};
-	cand.amp      = feat.amp;
-	cand.baseline = feat.baseline;
-	cand.rms      = feat.rms;
-	cand.ampRaw   = feat.ampRaw;
-	cand.rawId    = rawId;
-	cand.disk     = disk;
-	cand.board    = boardID;
-	cand.chan     = chanID;
-	cand.cidx     = cidx;
+	cand.amp       = feat.amp;
+	cand.baseline  = feat.baseline;
+	cand.rms       = feat.rms;
+	cand.ampRaw    = feat.ampRaw;
+	cand.peakpos   = feat.peakpos;
+	cand.timeResid = feat.timeResid;
+	cand.snr       = (feat.rms > 0.0) ? feat.amp / feat.rms : 0.0;
+	cand.rawId     = rawId;
+	cand.disk      = disk;
+	cand.board     = boardID;
+	cand.chan      = chanID;
+	cand.cidx      = cidx;
 
 	packRepWaveform(cand, waveform, feat.baseline, wfSize);
 
 	if(sipmIndexOK)
 	{
+		addPairCandidate(sipmId, cand);
+
 		if(!featSeen(sipmId))
 		{
 			markFeat(sipmId, cand);
@@ -3786,14 +3931,111 @@ void CaloDigiDQM::fillWaveformHealth(
 	fillHealth(boardID, 1.0 - badness, stats, eventBlock);
 }
 
+void CaloDigiDQM::addPairCandidate(int sid, SipmFeat const& f)
+{
+	if(!validIndexedSipmId(sid))
+		return;
+
+	const size_t idx = (size_t)sid;
+
+	if(pairCandidateStamp_[idx] != pairStamp_)
+	{
+		pairCandidateStamp_[idx] = pairStamp_;
+		pairCandidates_[idx].clear();
+		pairCandidateSipmIds_.push_back(sid);
+	}
+
+	pairCandidates_[idx].push_back(f);
+}
+
+bool CaloDigiDQM::selectBestTimeMatchedPair(int       evenId,
+                                            int       oddId,
+                                            SipmFeat& bestEven,
+                                            SipmFeat& bestOdd) const
+{
+	if(!pairCandidateSeen(evenId) || !pairCandidateSeen(oddId))
+		return false;
+
+	const auto& evens = pairCandidates_[(size_t)evenId];
+	const auto& odds  = pairCandidates_[(size_t)oddId];
+
+	bool   haveBest         = false;
+	bool   bestBothPositive = false;
+	double bestDt           = std::numeric_limits<double>::infinity();
+	double bestCenterResid  = std::numeric_limits<double>::infinity();
+	double bestAmpSum       = -std::numeric_limits<double>::infinity();
+	double bestSnrSum       = -std::numeric_limits<double>::infinity();
+
+	for(auto const& e : evens)
+	{
+		if(e.peakpos < 0)
+			continue;
+
+		for(auto const& o : odds)
+		{
+			if(o.peakpos < 0)
+				continue;
+
+			const bool   bothPositive = (e.amp > 0.0 && o.amp > 0.0);
+			const double dt           = std::abs((double)e.peakpos - (double)o.peakpos);
+			const double centerResid  = std::abs(0.5 * (e.timeResid + o.timeResid));
+			const double ampSum       = e.amp + o.amp;
+			const double snrSum       = e.snr + o.snr;
+
+			bool better = false;
+
+			if(!haveBest)
+			{
+				better = true;
+			}
+			else if(bothPositive != bestBothPositive)
+			{
+				better = bothPositive;
+			}
+			else if(dt != bestDt)
+			{
+				better = dt < bestDt;
+			}
+			else if(centerResid != bestCenterResid)
+			{
+				better = centerResid < bestCenterResid;
+			}
+			else if(ampSum != bestAmpSum)
+			{
+				better = ampSum > bestAmpSum;
+			}
+			else if(snrSum != bestSnrSum)
+			{
+				better = snrSum > bestSnrSum;
+			}
+
+			if(better)
+			{
+				haveBest         = true;
+				bestBothPositive = bothPositive;
+				bestDt           = dt;
+				bestCenterResid  = centerResid;
+				bestAmpSum       = ampSum;
+				bestSnrSum       = snrSum;
+				bestEven         = e;
+				bestOdd          = o;
+			}
+		}
+	}
+
+	return haveBest;
+}
+
 void CaloDigiDQM::processPairs(EventStats& stats, int eventBlock)
 {
-	// Multiple usable digis per SiPM can occur in one event.
-	// Pair-based quantities use one representative digi per SiPM,
-	// selected earlier by highest baseline-subtracted amplitude.
-	for(int sipmId : repSipmIds_)
+	// PairOK is 1 only when the adjacent even/odd regular SiPM partner exists
+	// and the selected time-matched pair is on the same disk.
+	for(int sipmId : pairCandidateSipmIds_)
 	{
 		if(!validIndexedSipmId(sipmId))
+			continue;
+
+		if(!featSeen(sipmId))
 			continue;
 
 		const auto& f = feat_[(size_t)sipmId];
@@ -3802,16 +4044,15 @@ void CaloDigiDQM::processPairs(EventStats& stats, int eventBlock)
 			continue;
 
 		const int  partnerId  = (sipmId % 2 == 0) ? sipmId + 1 : sipmId - 1;
-		const bool hasPartner = featSeen(partnerId);
-
-		fillQualityMetric(
-		    f.board, f.chan, QualityMetric::PairOK, hasPartner ? 1.0 : 0.0, eventBlock);
-
-		if(h_pair_ok_board_)
-			h_pair_ok_board_->Fill(f.board, hasPartner ? 1.0 : 0.0);
+		const bool hasPartner = pairCandidateSeen(partnerId);
 
 		if(!hasPartner)
 		{
+			fillQualityMetric(f.board, f.chan, QualityMetric::PairOK, 0.0, eventBlock);
+
+			if(h_pair_ok_board_)
+				h_pair_ok_board_->Fill(f.board, 0.0);
+
 			++stats.nUnpairedSipms;
 			fillIssue(f.board, IssueType::PairMiss);
 			fillBoardIssueMetric(f.board, f.chan, IssueType::PairMiss);
@@ -3822,19 +4063,23 @@ void CaloDigiDQM::processPairs(EventStats& stats, int eventBlock)
 	if(h_unpaired_evt_)
 		h_unpaired_evt_->Fill(stats.nUnpairedSipms);
 
-	if(h_pair_miss_frac_block_ && !repSipmIds_.empty())
+	if(h_pair_miss_frac_block_ && !pairCandidateSipmIds_.empty())
 	{
 		const double pairMissFrac =
-		    (double)stats.nUnpairedSipms / (double)repSipmIds_.size();
+		    (double)stats.nUnpairedSipms / (double)pairCandidateSipmIds_.size();
 		h_pair_miss_frac_block_->Fill(eventBlock, pairMissFrac);
 	}
 
 	// Pairing convention:
-	//   This code assumes adjacent even/odd SiPM IDs belong to the same crystal:
+	//   adjacent even/odd SiPM IDs belong to the same crystal:
 	//     even SiPM ID = one side
 	//     odd  SiPM ID = partner side
 	//     crystalId    = sipmId / 2
-	for(int sipmId : repSipmIds_)
+	//
+	// If multiple usable digis exist for either side, choose the even/odd pair
+	// using time matching first. Positive amplitudes are preferred, then closest
+	// peak time, then smallest center residual. Amplitude and SNR are tie-breakers.
+	for(int sipmId : pairCandidateSipmIds_)
 	{
 		if(!validIndexedSipmId(sipmId))
 			continue;
@@ -3846,11 +4091,71 @@ void CaloDigiDQM::processPairs(EventStats& stats, int eventBlock)
 		const int evenId = 2 * crystalId;
 		const int oddId  = evenId + 1;
 
-		if(!(featSeen(evenId) && featSeen(oddId)))
+		if(!(pairCandidateSeen(evenId) && pairCandidateSeen(oddId)))
 			continue;
 
-		const auto& fL = feat_[(size_t)evenId];
-		const auto& fR = feat_[(size_t)oddId];
+		SipmFeat fL;
+		SipmFeat fR;
+
+		if(!selectBestTimeMatchedPair(evenId, oddId, fL, fR))
+			continue;
+
+		// Sanity check: a physical L/R SiPM pair should not cross disks.
+		if(fL.disk != fR.disk)
+		{
+			recordSkip(SkipReason::PairDiskMismatch);
+			++stats.nPairDiskMismatches;
+			markPaired(crystalId);
+
+			fillIssue(fL.board, IssueType::PairDiskMismatch);
+			fillIssue(fR.board, IssueType::PairDiskMismatch);
+
+			fillBoardIssueMetric(fL.board, fL.chan, IssueType::PairDiskMismatch);
+			fillBoardIssueMetric(fR.board, fR.chan, IssueType::PairDiskMismatch);
+
+			fillQualityMetric(fL.board, fL.chan, QualityMetric::PairOK, 0.0, eventBlock);
+			fillQualityMetric(fR.board, fR.chan, QualityMetric::PairOK, 0.0, eventBlock);
+
+			if(h_pair_ok_board_)
+			{
+				h_pair_ok_board_->Fill(fL.board, 0.0);
+				h_pair_ok_board_->Fill(fR.board, 0.0);
+			}
+
+			fillHealth(fL.board, kPairMissHealth, stats, eventBlock);
+			fillHealth(fR.board, kPairMissHealth, stats, eventBlock);
+
+			const uint64_t nMismatch = skipCounts_[(int)SkipReason::PairDiskMismatch];
+
+			if(nMismatch <= 10)
+			{
+				mf::LogWarning("CaloDigiDQM")
+				    << "Disk mismatch for paired crystal " << crystalId << " (SiPM "
+				    << evenId << " rawId=" << fL.rawId << " board=" << fL.board
+				    << " chan=" << fL.chan << " disk=" << fL.disk << ", SiPM " << oddId
+				    << " rawId=" << fR.rawId << " board=" << fR.board
+				    << " chan=" << fR.chan << " disk=" << fR.disk
+				    << "). Skipping asymmetry for this pair.";
+			}
+			else if(nMismatch == 11)
+			{
+				mf::LogWarning("CaloDigiDQM")
+				    << "Further PairDiskMismatch warnings suppressed. "
+				    << "Total count will still be recorded in h_skip_reason and "
+				       "endJob().";
+			}
+
+			continue;
+		}
+
+		fillQualityMetric(fL.board, fL.chan, QualityMetric::PairOK, 1.0, eventBlock);
+		fillQualityMetric(fR.board, fR.chan, QualityMetric::PairOK, 1.0, eventBlock);
+
+		if(h_pair_ok_board_)
+		{
+			h_pair_ok_board_->Fill(fL.board, 1.0);
+			h_pair_ok_board_->Fill(fR.board, 1.0);
+		}
 
 		if(fL.rawId >= 0 && fR.rawId >= 0 && fL.rawId != kUnmappedRawId &&
 		   fR.rawId != kUnmappedRawId)
@@ -3927,18 +4232,10 @@ void CaloDigiDQM::processPairs(EventStats& stats, int eventBlock)
 			accDisk(MapMode::Asym, fL.disk, evenId, asym);
 			accDisk(MapMode::Asym, fR.disk, oddId, asym);
 		}
-
-		if(fL.disk != fR.disk)
-		{
-			mf::LogWarning("CaloDigiDQM")
-			    << "Disk mismatch for paired crystal " << crystalId << " (SiPM " << evenId
-			    << " in disk " << fL.disk << ", SiPM " << oddId << " in disk " << fR.disk
-			    << ").";
-		}
 	}
 }
 
-void CaloDigiDQM::queueRepresentativeWaveformsForStreaming()
+void CaloDigiDQM::queueRepWaveformsForStreaming()
 {
 	for(int sipmId : repSipmIds_)
 	{
@@ -3963,7 +4260,7 @@ void CaloDigiDQM::queueRepresentativeWaveformsForStreaming()
 	}
 }
 
-void CaloDigiDQM::queueRepresentativeLaserWaveformsForStreaming()
+void CaloDigiDQM::queueRepLaserWaveformsForStreaming()
 {
 	for(int chan : repLaserChannels_)
 	{
@@ -4040,13 +4337,14 @@ void CaloDigiDQM::fillDqmSummary(EventStats const& stats,
 	// in both pair-completeness and board-health summaries.
 
 	double pairStatus = 1.0;
-	if(!repSipmIds_.empty())
+	if(!pairCandidateSipmIds_.empty())
 	{
-		pairStatus =
-		    1.0 -
-		    std::min(1.0, (double)stats.nUnpairedSipms / (double)repSipmIds_.size());
-	}
+		const int badPairLikeSipms = stats.nUnpairedSipms + 2 * stats.nPairDiskMismatches;
 
+		pairStatus = 1.0 - std::min(1.0,
+		                            (double)badPairLikeSipms /
+		                                (double)pairCandidateSipmIds_.size());
+	}
 	double saturationStatus = 1.0;
 	double rmsStatus        = 1.0;
 
@@ -4162,7 +4460,7 @@ void CaloDigiDQM::streamIfScheduled()
 		auto& shifter       = hists_to_send[streamShifterPath_];
 		auto& shifterGraphs = graphs_to_send[streamShifterPath_];
 
-		updateNormalizedHist(h_occ_board_, h_occ_board_norm_);
+		updateNormalizedOccHistograms();
 
 		addHist(shifter, h_occ_board_norm_);
 		addGraph(shifterGraphs, g_nhits_ewt_);
@@ -4194,9 +4492,9 @@ void CaloDigiDQM::streamIfScheduled()
 		addHist(dqm, h_shape_class_board_);
 		addHist(dqm, h_shape_class_channel_);
 
-		addHist(g, h_occupancy_sparse_);
-		addHist(g, ref_h_occ_dense_);
-		addHist(g, h_occupancy_dense_);
+		addHist(g, h_occupancy_sparse_norm_);
+		//addHist(g, ref_h_occ_dense_);
+		addHist(g, h_occupancy_dense_norm_);
 		addHist(g, h_baseline_sparse_);
 		addHist(g, ref_h_base_dense_);
 		addHist(g, h_baseline_dense_);
@@ -4208,7 +4506,7 @@ void CaloDigiDQM::streamIfScheduled()
 		addHist(g, h_maxval_dense_);
 		addHist(g, ref_h_asym_);
 		addHist(g, h_asymmetry_);
-		addHist(g, h_global_board_vs_channel_);
+		addHist(g, h_global_board_vs_channel_norm_);
 		addHist(g, h_waveform_size_);
 		addHist(g, h_pair_multiplicity_);
 		addHist(g, h_skip_reason_);
@@ -4231,7 +4529,7 @@ void CaloDigiDQM::streamIfScheduled()
 		if(laserBoardUpdated_)
 		{
 			auto& lg = hists_to_send[streamLaserBoardPath_];
-			addHist(lg, laserBoardH_.occ);
+			addHist(lg, laserBoardH_.occNorm);
 			addHist(lg, laserBoardH_.base);
 			addHist(lg, laserBoardH_.rms);
 			addHist(lg, laserBoardH_.max);
@@ -4255,7 +4553,7 @@ void CaloDigiDQM::streamIfScheduled()
 			}
 
 			const auto& bh = boardH_[(size_t)bidx];
-			addHist(boardGroup, bh.occ);
+			addHist(boardGroup, bh.occNorm);
 			addHist(boardGroup, bh.base);
 			addHist(boardGroup, bh.rms);
 			addHist(boardGroup, bh.max);
@@ -4455,7 +4753,7 @@ void CaloDigiDQM::endJob()
 	flushAllLiveWaveforms();
 	flushAllLaserLiveWaveforms();
 	refreshDiskMaps();
-	updateNormalizedHist(h_occ_board_, h_occ_board_norm_);
+	updateNormalizedOccHistograms();
 
 	std::ostringstream skips;
 	skips << " skipCounts={";
