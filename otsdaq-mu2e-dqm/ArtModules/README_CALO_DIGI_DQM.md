@@ -717,6 +717,18 @@ These are the first histograms to check during online running.
 
 Use sparse histograms when diagnosing board-level patterns visually. Use dense histograms when a compact full-detector axis is more useful.
 
+### Additional monitoring objects
+
+| Histogram / object | Purpose |
+| ------------------ | ------- |
+| `D0_BoardQualityMatrix`, `D1_BoardQualityMatrix` | Disk-level board quality matrices. The x-axis is local board ID within the disk, and the y-axis is the quality metric. Values are averaged scores where `1` is good and `0` is bad. |
+| `h_occ_board` | Raw occupancy count by global board ID, including regular boards and laser board 160. |
+| `h_occ_board_norm` | Normalized board occupancy. This is useful for shifter displays because it shows the fraction of total hits per board rather than raw counts. |
+| `g_nhits_ewt` | Average number of `CaloDigi` objects versus art event number. This provides a compact event-rate or occupancy trend over the run. |
+| `h_asym_chanid` | Left/right asymmetry versus sparse encoded channel ID, `boardID*100 + chanID`. This helps identify channels or boards with localized asymmetry patterns. |
+| `h_amp_dist` | Global distribution of baseline-subtracted amplitudes for accepted digis. |
+| `h_skip_reason` | Counts of skipped or rejected digis and skipped derived calculations by reason, such as unmapped raw ID, invalid peak position, or too-small asymmetry denominator. |
+
 ### Event and time-trend histograms
 
 | Histogram           | Purpose                                                                |
@@ -1080,18 +1092,28 @@ Rollover protection resets stamps if `pairStamp_` reaches `std::numeric_limits<i
 
 ### Shifter dashboard
 
-Use this for fast operational monitoring:
+Use this for fast operational monitoring. In the online visualizer, this dashboard can combine objects from the `Shifter`, `DQM_Summary`, and `Global` streaming groups.
 
-```text
-h_dqm_summary
-h_dqm_issue_counts
-h_dqm_run_counters
-h_health_board
-h_issue_board
-h_pair_ok_board
-h_occ_sparse
-h_board_vs_channel
-```
+Shifter-focused objects:
+
+* `h_occ_board_norm` - normalized occupancy by board ID
+* `g_nhits_ewt` - average number of `CaloDigi` objects versus art event number
+* `h_amp_sparse` - mean amplitude versus sparse encoded channel ID
+* `h_asym_chanid` - asymmetry versus sparse encoded channel ID
+
+Core DQM status objects:
+
+* `h_dqm_summary` - compact pass/fail-style DQM status panel
+* `h_dqm_issue_counts` - issue counts by issue type
+* `h_dqm_run_counters` - processed events, digis, skips, send errors, and overflow counters
+* `h_health_board` - mean health score by board
+* `h_issue_board` - issue type versus board
+* `h_pair_ok_board` - pair completeness by board
+
+Useful global occupancy objects:
+
+* `h_occ_sparse` - full-detector occupancy using sparse encoded channel ID
+* `h_board_vs_channel` - board/channel occupancy heatmap
 
 This dashboard answers:
 
@@ -1100,6 +1122,8 @@ This dashboard answers:
 * Which issue type dominates?
 * Which boards look unhealthy?
 * Are channels or boards missing?
+* Is the occupancy pattern reasonable?
+* Are left/right asymmetry problems localized?
 
 ### Calorimeter expert dashboard
 
