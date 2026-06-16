@@ -5,7 +5,7 @@ process_name: myanalysis
 
 source: {
   module_type: RootInput
-  fileNames: [ "../../../../data_mv/raw.mu2e.cosmic_siDet_cal.disk1_phi0_000.107523_000002.art"]
+  fileNames: [ "../../../../data_mv/mc2_120678_digis_hits.art"]
 }
 
 services: {
@@ -24,7 +24,7 @@ services: {
   TimeTracker: {}
 
   TFileService: {
-    fileName: "calo_test_fin2.root"
+    fileName: "calo_test.root"
   //  closeFileFast: false
   }
 }
@@ -33,23 +33,22 @@ physics: {
   producers: {
     CaloDigisFromDTCEvents: {
       module_type: CaloDigisFromDTCEvents
-      dataType: 1
+      dataType: 0
       diagLevel: 0
       useOfflineID: true
     }
   }
 
   analyzers: {
-    myAnalysis: {
+    CaloDigiDQM: {
       module_type: CaloDigiDQM
       caloDigiModuleLabel: "CaloDigisFromDTCEvents"
-
-      address: "mu2edaq11-data.fnal.gov"
+      address: "mu2e-dl-01-data.fnal.gov"
       port: 6000
-      moduleTag: "SimpleDQM"
-      freqDQM: 10
-      freqWaveforms: 100
-      sendHists: false
+      moduleTag: "CaloDigiDQM"
+      freqDQM: 100
+      freqWaveforms: 0
+      sendHists: true
       enableDiskMaps: false
       diskCombines: ["amp"]
 
@@ -59,7 +58,7 @@ physics: {
   }
 
   p1: [ CaloDigisFromDTCEvents ]
-  e1: [ myAnalysis ]
+  e1: [ CaloDigiDQM ]
 
   trigger_paths: [ p1 ]
   end_paths: [ e1 ]
