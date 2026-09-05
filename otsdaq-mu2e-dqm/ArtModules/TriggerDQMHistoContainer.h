@@ -28,6 +28,15 @@ class TriggerDQMHistoContainer
 
 	std::vector<summaryInfoHist_> histograms;
 
+	/// Clear the contents of every booked histogram; used at run boundaries so a
+	/// long-lived art process does not carry entries from one run into the next.
+	void Reset(void)
+	{
+		for(auto& histo : histograms)
+			if(histo._Hist)
+				histo._Hist->Reset();
+	}
+
 	void BookSummaryHistos(art::ServiceHandle<art::TFileService> tfs,
 	                       std::string                           Title,
 	                       int                                   nBins,

@@ -34,6 +34,7 @@
 #include "art/Framework/Core/EDAnalyzer.h"
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
+#include "art/Framework/Principal/Run.h"
 #include "art/Framework/Services/Registry/ServiceHandle.h"
 
 #include "art_root_io/TFileDirectory.h"
@@ -52,9 +53,11 @@
 #include "fhiclcpp/types/Sequence.h"
 #include "fhiclcpp/types/Table.h"
 
+#include "TDirectory.h"
 #include "TFile.h"
 #include "TGraph.h"
 #include "TH1.h"
+#include "TList.h"
 #include "TH1F.h"
 #include "TH1I.h"
 #include "TH2.h"
@@ -211,6 +214,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 	explicit CaloDigiDQM(const art::EDAnalyzer::Table<Config>& config);
 	void analyze(art::Event const& event) override;
+	void beginRun(art::Run const& run) override;
 	void endJob() override;
 
   private:
@@ -728,6 +732,18 @@ class CaloDigiDQM : public art::EDAnalyzer
 	void createHistoSender();
 	void precomputeStreamPaths();
 	void bookGlobalHistograms();
+
+	// -----------------------
+	// Run-boundary helpers
+	// -----------------------
+	// Clear every per-run accumulator (ROOT objects, caches, counters, send queues).
+	void resetRunState();
+
+	// This module's top-level directory in the TFileService file, or nullptr.
+	TDirectory* moduleRootDirectory() const;
+
+	// Recursively reset every histogram and graph below dir, keeping the structure.
+	static void resetRootObjectsIn(TDirectory* dir);
 
 	// -----------------------
 	// Event-processing helpers
@@ -2758,19 +2774,26 @@ void CaloDigiDQM::ensureLaserFirstHitBooked(int              chanID,
 		return;
 	if(laserOneHitSeen_[(size_t)chanID])
 		return;
-	if(!laserBoardChanDir_)
-		return;
 
-	art::TFileDirectory& chanDir = *laserBoardChanDir_;
+	// After a run boundary the histogram already exists and is refilled with the first
+	// hit of the new run instead of being booked again.
+	TH1F* onehitHist = laserOneHitWf_[(size_t)chanID];
+	if(!onehitHist)
+	{
+		if(!laserBoardChanDir_)
+			return;
 
-	TString cname  = Form("B160_C%02d_FirstHit", chanID);
-	TString ctitle = Form("First-Hit Waveform for %s",
-	                      channelLabel(kLaserBoardID, chanID, rawId, sipmId).Data());
+		art::TFileDirectory& chanDir = *laserBoardChanDir_;
 
-	TH1F* onehitHist = chanDir.make<TH1F>(
-	    cname.Data(), ctitle.Data(), kWaveformNBins, 0, kWaveformNBins);
-	onehitHist->GetYaxis()->SetTitle("ADC - Baseline");
-	onehitHist->GetXaxis()->SetTitle("Tick");
+		TString cname  = Form("B160_C%02d_FirstHit", chanID);
+		TString ctitle = Form("First-Hit Waveform for %s",
+		                      channelLabel(kLaserBoardID, chanID, rawId, sipmId).Data());
+
+		onehitHist = chanDir.make<TH1F>(
+		    cname.Data(), ctitle.Data(), kWaveformNBins, 0, kWaveformNBins);
+		onehitHist->GetYaxis()->SetTitle("ADC - Baseline");
+		onehitHist->GetXaxis()->SetTitle("Tick");
+	}
 
 	const int nb = onehitHist->GetNbinsX();
 	const int n  = std::min<int>(wfSize, nb);
@@ -2966,20 +2989,26 @@ void CaloDigiDQM::ensureFirstHitBooked(int              disk,
 	if(oneHitSeen_[(size_t)cidx])
 		return;
 
-	const int bidx = boardIndex(disk, boardID);
-	if(bidx < 0 || bidx >= kTotalBoards || !boardChanDir_[(size_t)bidx])
-		return;
+	// After a run boundary the histogram already exists and is refilled with the first
+	// hit of the new run instead of being booked again.
+	TH1F* onehitHist = oneHitWf_[(size_t)cidx];
+	if(!onehitHist)
+	{
+		const int bidx = boardIndex(disk, boardID);
+		if(bidx < 0 || bidx >= kTotalBoards || !boardChanDir_[(size_t)bidx])
+			return;
 
-	art::TFileDirectory& chanDir = *boardChanDir_[(size_t)bidx];
+		art::TFileDirectory& chanDir = *boardChanDir_[(size_t)bidx];
 
-	TString cname  = Form("D%d_B%03d_C%02d_FirstHit", disk, boardID, chanID);
-	TString ctitle = Form("First-Hit Waveform for %s",
-	                      channelLabel(boardID, chanID, rawId, sipmId).Data());
+		TString cname  = Form("D%d_B%03d_C%02d_FirstHit", disk, boardID, chanID);
+		TString ctitle = Form("First-Hit Waveform for %s",
+		                      channelLabel(boardID, chanID, rawId, sipmId).Data());
 
-	TH1F* onehitHist = chanDir.make<TH1F>(
-	    cname.Data(), ctitle.Data(), kWaveformNBins, 0, kWaveformNBins);
-	onehitHist->GetYaxis()->SetTitle("ADC - Baseline");
-	onehitHist->GetXaxis()->SetTitle("Tick");
+		onehitHist = chanDir.make<TH1F>(
+		    cname.Data(), ctitle.Data(), kWaveformNBins, 0, kWaveformNBins);
+		onehitHist->GetYaxis()->SetTitle("ADC - Baseline");
+		onehitHist->GetXaxis()->SetTitle("Tick");
+	}
 
 	const int nb = onehitHist->GetNbinsX();
 	const int n  = std::min<int>(wfSize, nb);
@@ -3220,6 +3249,126 @@ void CaloDigiDQM::clearWaveformSendQueues()
 	}
 
 	updatedLaserChannels_.clear();
+}
+
+// ===========================
+// Run boundary handling
+// ===========================
+// The DQM art process can outlive a run (for example when it reads from a dispatcher).
+// Every per-run accumulator is cleared here so the first streamed packets, and the saved
+// ROOT file, do not carry entries from the previous run.
+void CaloDigiDQM::beginRun(art::Run const& run)
+{
+	mf::LogInfo("CaloDigiDQM") << "beginRun " << run.run()
+	                           << ": resetting histograms, caches, and counters.";
+	resetRunState();
+}
+
+// Every global histogram is booked in <module label>/Global_Histograms, so the mother
+// of that directory is the module's own top-level directory.
+TDirectory* CaloDigiDQM::moduleRootDirectory() const
+{
+	for(TH1* h : {static_cast<TH1*>(h_evt_digis_),
+	              static_cast<TH1*>(h_dqm_run_counters_),
+	              static_cast<TH1*>(h_skip_reason_)})
+	{
+		if(!h || !h->GetDirectory())
+			continue;
+
+		TDirectory* globalDir = h->GetDirectory();
+		return globalDir->GetMotherDir() ? globalDir->GetMotherDir() : globalDir;
+	}
+
+	return nullptr;
+}
+
+// Directories, axis labels, and styling are kept so the objects can simply be refilled.
+void CaloDigiDQM::resetRootObjectsIn(TDirectory* dir)
+{
+	if(!dir)
+		return;
+
+	TIter    next(dir->GetList());
+	TObject* obj = nullptr;
+	while((obj = next()))
+	{
+		if(obj->InheritsFrom(TDirectory::Class()))
+			resetRootObjectsIn(static_cast<TDirectory*>(obj));
+		else if(obj->InheritsFrom(TH1::Class()))
+			static_cast<TH1*>(obj)->Reset("ICESM");
+		else if(obj->InheritsFrom(TGraph::Class()))
+			static_cast<TGraph*>(obj)->Set(0);
+	}
+}
+
+void CaloDigiDQM::resetRunState()
+{
+	// ROOT objects owned by this module. Reference histograms are detached from any
+	// directory (SetDirectory(nullptr)) and are intentionally left untouched.
+	if(TDirectory* moduleDir = moduleRootDirectory())
+	{
+		for(const char* sub : {"Disk0", "Disk1", "Global_Histograms", "Laser"})
+			resetRootObjectsIn(moduleDir->GetDirectory(sub));
+	}
+	else
+	{
+		mf::LogWarning("CaloDigiDQM")
+		    << "Could not locate the module ROOT directory; histograms were not reset "
+		    << "at the run boundary.";
+	}
+
+	if(g_nhits_ewt_)
+		g_nhits_ewt_->Set(0);
+
+	// Event and bookkeeping counters.
+	eventCounter_ = 0;
+	skipCounts_.fill(0);
+	nFillDisk0_ = nFillDisk1_ = nFillLaser_ = nFillMiss_ = 0;
+	nLaserAmpAccepted_ = nDetLaserRatioAccepted_ = 0;
+	nEvtDigisOverflow_ = nWaveformSizeOverflow_ = nAmpOverflow_ = 0;
+	nOutOfRangeSipmId_         = 0;
+	histConsecutiveSendErrors_ = 0;
+	histTotalSendErrors_       = 0;
+
+	nhitsBlockSum_       = 0.0;
+	eventNumberBlockSum_ = 0.0;
+	nhitsBlockCount_     = 0;
+
+	// Disk-map running means.
+	for(auto& perDisk : diskSum_)
+		for(auto& sums : perDisk)
+			std::fill(sums.begin(), sums.end(), 0.0);
+	for(auto& perDisk : diskCnt_)
+		for(auto& counts : perDisk)
+			std::fill(counts.begin(), counts.end(), 0u);
+
+	// Waveform caches and size statistics.
+	std::fill(wfStats_.begin(), wfStats_.end(), WaveformSizeStats{});
+	laserWfStats_.fill(WaveformSizeStats{});
+	std::fill(lastWfValid_.begin(), lastWfValid_.end(), 0u);
+	laserLastWfValid_.fill(0u);
+	std::fill(liveWaveformUpdated_.begin(), liveWaveformUpdated_.end(), 0u);
+	laserLiveWaveformUpdated_.fill(0u);
+	waveformDensityUpdated_ = false;
+
+	// Channels re-register themselves on their first digi of the new run.
+	std::fill(channelSeen_.begin(), channelSeen_.end(), 0u);
+	laserChannelSeen_.fill(0u);
+	activeRegularChannels_.clear();
+	activeLaserChannels_.clear();
+
+	// First-hit waveforms keep their booked histograms, but the first hit of the new run
+	// is captured and streamed again (see ensureFirstHitBooked).
+	std::fill(oneHitSeen_.begin(), oneHitSeen_.end(), 0u);
+	std::fill(oneHitSent_.begin(), oneHitSent_.end(), 0u);
+	laserOneHitSeen_.fill(0u);
+	laserOneHitSent_.fill(0u);
+	pendingRegularFirstHits_ = 0;
+	pendingLaserFirstHits_   = 0;
+
+	// Streaming work still queued from the previous run.
+	clearSummarySendQueues();
+	clearWaveformSendQueues();
 }
 
 // ===========================
@@ -4597,7 +4746,9 @@ void CaloDigiDQM::streamIfScheduled()
 		{
 			const std::string& oneHitPath = streamLaserOneHitPath_[(size_t)chan];
 
-			if(laserOneHitWf_[(size_t)chan] && !laserOneHitSent_[(size_t)chan])
+			// Only stream first-hit waveforms captured in the current run.
+			if(laserOneHitWf_[(size_t)chan] && laserOneHitSeen_[(size_t)chan] &&
+			   !laserOneHitSent_[(size_t)chan])
 			{
 				hists_to_send[oneHitPath].push_back(laserOneHitWf_[(size_t)chan]);
 				laserOneHitSentThisCall_.push_back(chan);
@@ -4631,7 +4782,9 @@ void CaloDigiDQM::streamIfScheduled()
 		{
 			const std::string& oneHitPath = streamOneHitPath_[(size_t)cidx];
 
-			if(oneHitWf_[(size_t)cidx] && !oneHitSent_[(size_t)cidx])
+			// Only stream first-hit waveforms captured in the current run.
+			if(oneHitWf_[(size_t)cidx] && oneHitSeen_[(size_t)cidx] &&
+			   !oneHitSent_[(size_t)cidx])
 			{
 				hists_to_send[oneHitPath].push_back(oneHitWf_[(size_t)cidx]);
 				regularOneHitSentThisCall_.push_back(cidx);

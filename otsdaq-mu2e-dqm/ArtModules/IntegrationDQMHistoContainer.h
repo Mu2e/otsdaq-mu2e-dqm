@@ -156,6 +156,20 @@ class IntegrationDQMHistoContainer
 				hists.push_back((TH1*)pulse._Hist->Clone());
 			return hists;
 		}
+		void Reset()
+		{
+			IntegrationDQMHistoContainer::ResetHist(digi_count);
+			IntegrationDQMHistoContainer::ResetHist(digi_t0);
+			IntegrationDQMHistoContainer::ResetHist(digi_tfit);
+			IntegrationDQMHistoContainer::ResetHist(digi_dt0);
+			IntegrationDQMHistoContainer::ResetHist(digi_dtfit);
+			IntegrationDQMHistoContainer::ResetHist(digi_tfit_t0);
+			IntegrationDQMHistoContainer::ResetHist(digi_fit_status);
+			IntegrationDQMHistoContainer::ResetHist(digi_peak);
+			IntegrationDQMHistoContainer::ResetHist(sipms);
+			for(auto& pulse : pulses)
+				IntegrationDQMHistoContainer::ResetHist(pulse);
+		}
 	};
 
 	// Trk histograms
@@ -220,6 +234,14 @@ class IntegrationDQMHistoContainer
 			for(auto& pulse : pulses)
 				hists.push_back((TH1*)pulse._Hist->Clone());
 			return hists;
+		}
+		void Reset()
+		{
+			IntegrationDQMHistoContainer::ResetHist(digi_count);
+			IntegrationDQMHistoContainer::ResetHist(digi_t0);
+			IntegrationDQMHistoContainer::ResetHist(digi_dt0);
+			for(auto& pulse : pulses)
+				IntegrationDQMHistoContainer::ResetHist(pulse);
 		}
 	};
 
@@ -317,6 +339,17 @@ class IntegrationDQMHistoContainer
 				hists.push_back((TH1*)pulse._Hist->Clone());
 			return hists;
 		}
+		void Reset()
+		{
+			IntegrationDQMHistoContainer::ResetHist(digi_count);
+			IntegrationDQMHistoContainer::ResetHist(ewt);
+			IntegrationDQMHistoContainer::ResetHist(injection_time);
+			IntegrationDQMHistoContainer::ResetHist(injection_window);
+			IntegrationDQMHistoContainer::ResetHist(marker_count);
+			IntegrationDQMHistoContainer::ResetHist(ewt_count);
+			for(auto& pulse : pulses)
+				IntegrationDQMHistoContainer::ResetHist(pulse);
+		}
 	};
 
 	// STM histograms
@@ -383,6 +416,14 @@ class IntegrationDQMHistoContainer
 			                           (TH1*)digi_dt0._Hist->Clone(),
 			                           (TH1*)pulse._Hist->Clone()};
 			return hists;
+		}
+		void Reset()
+		{
+			IntegrationDQMHistoContainer::ResetHist(digi_count);
+			IntegrationDQMHistoContainer::ResetHist(digi_ids);
+			IntegrationDQMHistoContainer::ResetHist(digi_t0);
+			IntegrationDQMHistoContainer::ResetHist(digi_dt0);
+			IntegrationDQMHistoContainer::ResetHist(pulse);
 		}
 	};
 
@@ -469,6 +510,16 @@ class IntegrationDQMHistoContainer
 			                           (TH1*)detector_digis._Hist->Clone()};
 			return hists;
 		}
+		void Reset()
+		{
+			IntegrationDQMHistoContainer::ResetHist(trk_calo_deltat0);
+			IntegrationDQMHistoContainer::ResetHist(trk_crv_deltat0);
+			IntegrationDQMHistoContainer::ResetHist(trk_stm_deltat0);
+			IntegrationDQMHistoContainer::ResetHist(calo_crv_deltat0);
+			IntegrationDQMHistoContainer::ResetHist(calo_stm_deltat0);
+			IntegrationDQMHistoContainer::ResetHist(crv_stm_deltat0);
+			IntegrationDQMHistoContainer::ResetHist(detector_digis);
+		}
 	};
 
 	globalHist_t _global_hists;
@@ -476,6 +527,24 @@ class IntegrationDQMHistoContainer
 	trkHist_t    _trk_hists;
 	crvHist_t    _crv_hists;
 	stmHist_t    _stm_hists;
+
+	/// Clear the contents of every booked histogram; used at run boundaries so a
+	/// long-lived art process does not carry entries from one run into the next.
+	/// Sub-detector groups that were never initialized hold null histograms and are skipped.
+	void Reset()
+	{
+		_global_hists.Reset();
+		_calo_hists.Reset();
+		_trk_hists.Reset();
+		_crv_hists.Reset();
+		_stm_hists.Reset();
+	}
+
+	static void ResetHist(summaryInfoHist_t& h)
+	{
+		if(h._Hist)
+			h._Hist->Reset();
+	}
 
 	// Histogram colors by status
 	static void GoodHist(TH1* h)

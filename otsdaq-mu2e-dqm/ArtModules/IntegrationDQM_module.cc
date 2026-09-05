@@ -5,6 +5,7 @@
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
+#include "art/Framework/Principal/Run.h"
 #include "art_root_io/TFileService.h"
 #include "fhiclcpp/types/OptionalAtom.h"
 
@@ -779,6 +780,15 @@ std::vector<mu2e::CRVDataDecoder::CRVGlobalRunInfo> ots::IntegrationDQM::decode_
 
 void ots::IntegrationDQM::endJob() {}
 
-void ots::IntegrationDQM::beginRun(const art::Run& run) {}
+void ots::IntegrationDQM::beginRun(const art::Run& run)
+{
+	// Histograms are sent in replace mode and never reset within a run, so they hold the
+	// whole run's statistics. Clear them here so a new run starts from zero instead of
+	// inheriting the previous run's contents in a long-lived art process.
+	__COUT__ << "[IntegrationDQM::beginRun] Run " << run.run()
+	         << ": resetting histograms and event counter" << std::endl;
+	evtCounter_ = 0;
+	hists_.Reset();
+}
 
 DEFINE_ART_MODULE(ots::IntegrationDQM)

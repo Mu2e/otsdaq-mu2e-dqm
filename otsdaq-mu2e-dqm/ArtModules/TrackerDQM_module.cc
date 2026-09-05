@@ -17,6 +17,7 @@
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
+#include "art/Framework/Principal/Run.h"
 #include "art_root_io/TFileService.h"
 #include "artdaq-core-mu2e/Overlays/DTCEventFragment.hh"
 #include "artdaq-core-mu2e/Overlays/Decoders/TrackerDataDecoder.hh"
@@ -304,6 +305,16 @@ void ots::TrackerDQM::analyze_tracker_(const mu2e::TrackerDataDecoder& cc)
 
 void ots::TrackerDQM::endJob() {}
 
-void ots::TrackerDQM::beginRun(const art::Run& run) {}
+void ots::TrackerDQM::beginRun(const art::Run& run)
+{
+	// The DQM art process can outlive a run. Clear whatever accumulated since the last
+	// send so the first packet of the new run does not carry entries from the previous one.
+	__COUT__ << "[TrackerDQM::beginRun] Run " << run.run()
+	         << ": resetting histograms and event counter" << std::endl;
+	evtCounter_ = 0;
+	summary_histos->Reset();
+	pedestal_histos->Reset();
+	panel_histos->Reset();
+}
 
 DEFINE_ART_MODULE(ots::TrackerDQM)

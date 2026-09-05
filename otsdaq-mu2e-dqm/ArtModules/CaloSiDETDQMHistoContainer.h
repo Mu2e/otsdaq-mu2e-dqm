@@ -1,6 +1,7 @@
 #ifndef _CaloSiDETDQMHistoContainer_h_
 #define _CaloSiDETDQMHistoContainer_h_
 
+#include <TGraph.h>
 #include <TH1F.h>
 #include <string>
 #include "art/Framework/Services/Registry/ServiceHandle.h"
@@ -39,6 +40,18 @@ class CaloSiDETDQMHistoContainer
 	InfoHist_  h1_channel_occupancy;
 	InfoHist_  h1_channel_occupancy_lastevent;
 	InfoGraph_ g_nhits_event;
+
+	/// Clear the contents of every booked histogram and graph; used at run boundaries
+	/// so a long-lived art process does not carry entries from one run into the next.
+	void Reset(void)
+	{
+		if(h1_channel_occupancy._Hist)
+			h1_channel_occupancy._Hist->Reset();
+		if(h1_channel_occupancy_lastevent._Hist)
+			h1_channel_occupancy_lastevent._Hist->Reset();
+		if(g_nhits_event._Graph)
+			g_nhits_event._Graph->Set(0);
+	}
 
 	// Histogram colors by status
 	static void GoodHist(TH1* h)

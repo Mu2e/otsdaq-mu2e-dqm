@@ -5,6 +5,7 @@
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
+#include "art/Framework/Principal/Run.h"
 #include "art/Framework/Services/System/TriggerNamesService.h"
 #include "art_root_io/TFileService.h"
 #include "canvas/Persistency/Common/TriggerResults.h"
@@ -527,6 +528,14 @@ void ots::CaloIERCDQM::summary_fill(CaloIERCDQMHistoContainer*      histos,
 
 void ots::CaloIERCDQM::endJob() {}
 
-void ots::CaloIERCDQM::beginRun(const art::Run& run) {}
+void ots::CaloIERCDQM::beginRun(const art::Run& run)
+{
+	// The dt histograms and dt-vs-event graphs grow for the whole run and are sent in
+	// replace mode. Clear them so a long-lived art process starts each run clean.
+	__COUT__ << "[CaloIERCDQM::beginRun] Run " << run.run()
+	         << ": resetting histograms, graphs, and event counter" << std::endl;
+	evtCounter_ = 0;
+	histo_container->Reset();
+}
 
 DEFINE_ART_MODULE(ots::CaloIERCDQM)

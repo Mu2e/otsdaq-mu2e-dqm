@@ -5,6 +5,7 @@
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
+#include "art/Framework/Principal/Run.h"
 #include "art/Framework/Services/System/TriggerNamesService.h"
 #include "art_root_io/TFileService.h"
 #include "canvas/Persistency/Common/TriggerResults.h"
@@ -173,6 +174,14 @@ void ots::TriggerDQM::summary_trigger_fill(TriggerDQMHistoContainer*      histos
 
 void ots::TriggerDQM::endJob() {}
 
-void ots::TriggerDQM::beginRun(const art::Run& run) {}
+void ots::TriggerDQM::beginRun(const art::Run& run)
+{
+	// The DQM art process can outlive a run. Clear whatever accumulated since the last
+	// send so the first packet of the new run does not carry entries from the previous one.
+	__COUT__ << "[TriggerDQM::beginRun] Run " << run.run()
+	         << ": resetting histograms and event counter" << std::endl;
+	evtCounter_ = 0;
+	summary_histos->Reset();
+}
 
 DEFINE_ART_MODULE(ots::TriggerDQM)

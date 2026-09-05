@@ -5,6 +5,7 @@
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
+#include "art/Framework/Principal/Run.h"
 #include "art/Framework/Services/System/TriggerNamesService.h"
 #include "art_root_io/TFileService.h"
 #include "canvas/Persistency/Common/TriggerResults.h"
@@ -259,6 +260,14 @@ void ots::CaloSiDETDQM::summary_fill(art::Event const&               event,
 
 void ots::CaloSiDETDQM::endJob() {}
 
-void ots::CaloSiDETDQM::beginRun(const art::Run& run) {}
+void ots::CaloSiDETDQM::beginRun(const art::Run& run)
+{
+	// The occupancy histogram and the hits-per-event graph grow for the whole run and are
+	// sent in replace mode. Clear them so a long-lived art process starts each run clean.
+	__COUT__ << "[CaloSiDETDQM::beginRun] Run " << run.run()
+	         << ": resetting histograms, graph, and event counter" << std::endl;
+	evtCounter_ = 0;
+	histo_container->Reset();
+}
 
 DEFINE_ART_MODULE(ots::CaloSiDETDQM)

@@ -5,6 +5,7 @@
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
+#include "art/Framework/Principal/Run.h"
 #include "art_root_io/TFileService.h"
 
 #include <TBufferFile.h>
@@ -131,6 +132,15 @@ void ots::SimpleDQM::endJob()
 	         << " events\n";
 }
 
-void ots::SimpleDQM::beginRun(const art::Run&) {}
+void ots::SimpleDQM::beginRun(const art::Run& run)
+{
+	// The counter histogram is never reset within a run (it is sent in replace mode), so
+	// clear it here to keep a long-lived art process from carrying counts across runs.
+	__COUT__ << "[SimpleDQM::" << __func__ << "] Run " << run.run()
+	         << ": resetting histogram and event counter" << std::endl;
+	evtCounter_ = 0;
+	if(hist_)
+		hist_->Reset();
+}
 
 DEFINE_ART_MODULE(ots::SimpleDQM)

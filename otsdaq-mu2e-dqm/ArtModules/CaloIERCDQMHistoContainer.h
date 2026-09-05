@@ -1,7 +1,9 @@
 #ifndef _CaloIERCDQMHistoContainer_h_
 #define _CaloIERCDQMHistoContainer_h_
 
+#include <TGraph.h>
 #include <TH1F.h>
+#include <map>
 #include <string>
 #include "art/Framework/Services/Registry/ServiceHandle.h"
 #include "art_root_io/TFileDirectory.h"
@@ -39,6 +41,23 @@ class CaloIERCDQMHistoContainer
 
 	std::map<int, InfoHist_>  map_h1_dt_diffboard;
 	std::map<int, InfoGraph_> map_g_dtevt_diffboard;
+
+	/// Clear the contents of every booked histogram and graph; used at run boundaries
+	/// so a long-lived art process does not carry entries from one run into the next.
+	/// The objects stay booked and are simply refilled.
+	void Reset(void)
+	{
+		for(auto* hists : {&map_h1_dt_singlechan, &map_h1_dt_sameboard, &map_h1_dt_diffboard})
+			for(auto& pair : *hists)
+				if(pair.second._Hist)
+					pair.second._Hist->Reset();
+
+		for(auto* graphs :
+		    {&map_g_dtevt_singlechan, &map_g_dtevt_sameboard, &map_g_dtevt_diffboard})
+			for(auto& pair : *graphs)
+				if(pair.second._Graph)
+					pair.second._Graph->Set(0);
+	}
 
 	void BookSingleChannel(art::ServiceHandle<art::TFileService> tfs,
 	                       int                                   mapID,
