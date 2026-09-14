@@ -17,7 +17,6 @@ cet_build_plugin(CaloDigiDQM art::module LIBRARIES REG
   Offline::DAQ
   Offline::CaloConditions
   Offline::CaloVisualizer
-  Offline::CaloVisualizer_dict
   Offline::Mu2eInterfaces
   ROOT::Hist
   ROOT::Tree
