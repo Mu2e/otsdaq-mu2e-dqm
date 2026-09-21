@@ -1,0 +1,64 @@
+#include "Offline/fcl/standardServices.fcl"
+#include "Offline/CRVResponse/fcl/prolog.fcl"
+#include "Offline/CRVDQM/fcl/prolog.fcl"
+
+process_name : CrvDQM
+
+services : {
+  @table::Services.Core
+  @table::Services.Reco
+  TFileService : {
+    fileName : "crvDQM.root"
+  }
+}
+
+source : {
+  module_type : RootInput
+  fileNames   : @nil
+  maxEvents   : -1
+}
+
+physics : {
+  producers : {
+    crvdigi : {
+      module_type    : CrvDigisFromArtdaqFragmentsFEBII
+      diagLevel      : 0
+      produceNZS     : false
+      useROC4asROC2  : true
+    }
+  }
+  analyzers : {
+    crvdqm : {
+      module_type      : CrvDQM
+      crvDigiTag       : "crvdigi"
+      crvStatusTag     : "crvdigi"
+      diagLevel        : 1
+      sendHists        : false
+      enableHttpServer : false
+      dummyHist        : false
+      saveCanvasesToPdf: true
+      showSameFpgaTimingInCanvas: false
+
+      # Binning is fixed in the CRV DQM clients (Offline/CRVDQM). These two
+      # tables choose only which copies of each histogram exist (job, rolling
+      # window, per subrun) and which HistoSender ships, under which folder;
+      # both are read at configure time, so they change between runs with no
+      # rebuild. The presets and every rule are in
+      # Offline/CRVDQM/fcl/prolog.fcl; override below this block, e.g.
+      #   physics.analyzers.crvdqm.digi.hists.rules : [ ... ]
+      digi   : @local::CRVDQM.DigiOnline
+      # Per-link status pages (crv/status). The status summaries come from
+      # CrvStatusMetrics with CRVDQM.StatusOnline, so nothing is shipped twice.
+      status : @local::CRVDQM.StatusLinksOnline
+    }
+  }
+  t1 : [ crvdigi ]
+  a1 : [ crvdqm ]
+  trigger_paths : [ t1 ]
+  end_paths     : [ a1 ]
+}
+
+services.TimeTracker.printSummary: true
+services.scheduler.wantSummary: true
+services.message.destinations.log.outputStatistics : false
+services.GeometryService.inputFile: "Offline/Mu2eG4/geom/geom_common_extracted.txt"
