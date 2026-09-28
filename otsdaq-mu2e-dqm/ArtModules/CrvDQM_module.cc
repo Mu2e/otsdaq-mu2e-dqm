@@ -188,8 +188,8 @@ class CrvDQM : public art::EDAnalyzer
 	// Invalid (0xFFFF) link-latency words / status blocks, per link, over the
 	// rolling window when the status table keeps one, else over the run.
 	void updateInvalidLatencyRate();
-	// Display-only zoom of the FEB-port axes onto the ports that have data.
-	void zoomToActivePorts();
+	// Display-only zoom of the global FEB axes onto the febIds that have data.
+	void zoomToActiveGlobalFebs();
 	// Geometry + channel map -> the sector map and FEB topology the digi client
 	// needs for its per-sector occupancy and its partner-FEB timing. Redone on
 	// every new run, since the channel map can change between runs.
@@ -646,14 +646,14 @@ void CrvDQM::updateLayout(art::Event const& event)
 	}
 }
 
-void CrvDQM::zoomToActivePorts()
+void CrvDQM::zoomToActiveGlobalFebs()
 {
-	const auto& ports = dqm_.activeFebPorts();
-	if(ports.empty())
+	const auto& febIds = dqm_.activeGlobalFebs();
+	if(febIds.empty())
 		return;
-	// One port of margin, so an edge FEB going quiet is still visible.
-	const int lo = std::max(*ports.begin() - 1, 0);
-	const int hi = std::min(*ports.rbegin() + 1, mu2e::CRVDQMRun1::kNFebPorts - 1);
+	// One FEB of margin, so an edge FEB going quiet is still visible.
+	const int lo = std::max(*febIds.begin() - 1, 0);
+	const int hi = std::min(*febIds.rbegin() + 1, mu2e::CRVDQMRun1::kNFebs - 1);
 	const int nChan = mu2e::CRVDQMRun1::kNChanPerFEB;
 	for(TH1* h : dqm_.hists().copies("h1_channels"))
 		h->GetXaxis()->SetRangeUser(lo * nChan - 0.5, (hi + 1) * nChan - 0.5);
@@ -883,7 +883,7 @@ void CrvDQM::updateWebDisplay(bool force)
 				                            std::max(1.0, 1.15 * maxContent));
 			}
 		}
-		zoomToActivePorts();
+		zoomToActiveGlobalFebs();
 		updateInvalidLatencyRate();
 		h_invalidLatencyRate_->GetYaxis()->SetRangeUser(
 		    0.0, std::max(1e-3, 1.15 * h_invalidLatencyRate_->GetMaximum()));
@@ -1090,7 +1090,7 @@ void CrvDQM::endJob()
 		if(!dummyHist_)
 		{
 			std::cout << outputPrefix_ << "Total digis: " << dqm_.nDigis() << std::endl;
-			std::cout << outputPrefix_ << "Active FEB ports: " << dqm_.activeFebPorts().size()
+			std::cout << outputPrefix_ << "Active global FEB IDs: " << dqm_.activeGlobalFebs().size()
 			          << std::endl;
 			// Print FEBs per ROC
 			for(auto& [roc, febs] : dqm_.rocFEBMap())
@@ -1142,7 +1142,7 @@ void CrvDQM::endJob()
 		updateWebDisplay(true);
 	}
 
-	// Summary canvases: one per FEB port with hits, showing its FPGA-pair dt
+	// Summary canvases: one per global FEB ID with hits, showing its FPGA-pair dt
 	// columns of dtFpgaPairs as histograms.
 	if(!dummyHist_ && dqm_.dtFpgaPairs() != nullptr)
 	{
@@ -1152,15 +1152,15 @@ void CrvDQM::endJob()
 		art::TFileDirectory canvasDir =
 		    tfs_->mkdir(outputTag_).mkdir("timing_feb_canvases");
 
-		for(int port = 0; port < mu2e::CRVDQMRun1::kNFebPorts; ++port)
+		for(int globalFeb = 0; globalFeb < mu2e::CRVDQMRun1::kNFebs; ++globalFeb)
 		{
-			const int firstCol = port * kNFpgaPairs + 1;
+			const int firstCol = globalFeb * kNFpgaPairs + 1;
 			if(pairs->Integral(firstCol, firstCol + kNFpgaPairs - 1, 0, pairs->GetNbinsY() + 1) <= 0.)
 				continue;
-			const int   roc    = port / mu2e::CRVDQMRun1::kNFebPerROC + 1;
-			const int   feb    = port % mu2e::CRVDQMRun1::kNFebPerROC + 1;
-			std::string cName  = Form("c_timing_port%03d", port);
-			std::string cTitle = Form("FPGA timing, FEB port %d (ROC %d FEB %d)", port, roc, feb);
+			const int   roc    = globalFeb / mu2e::CRVDQMRun1::kNFebPerROC + 1;
+			const int   feb    = globalFeb % mu2e::CRVDQMRun1::kNFebPerROC + 1;
+			std::string cName  = Form("c_timing_feb%03d", globalFeb);
+			std::string cTitle = Form("FPGA timing, global FEB ID %d (ROC %d FEB %d)", globalFeb, roc, feb);
 			TCanvas*    c =
 			    canvasDir.make<TCanvas>(cName.c_str(), cTitle.c_str(), 1200, 1200);
 			TDirectory* saveDir = gDirectory;
@@ -1172,12 +1172,12 @@ void CrvDQM::endJob()
 				{
 					if(!showSameFpgaTimingInCanvas_ && fpgaA == fpgaB)
 						continue;
-					const int col = port * kNFpgaPairs + fpgaPairIndex(fpgaA, fpgaB) + 1;
+					const int col = globalFeb * kNFpgaPairs + fpgaPairIndex(fpgaA, fpgaB) + 1;
 					TH1* slice = pairs->ProjectionY(
-					    Form("dt_port%03d_fpga%d_fpga%d", port, fpgaA, fpgaB), col, col);
+					    Form("dt_feb%03d_fpga%d_fpga%d", globalFeb, fpgaA, fpgaB), col, col);
 					slice->SetDirectory(nullptr);
-					slice->SetTitle(Form("#Deltat FEB port %d FPGA %d - FPGA %d;#Deltat [ns];Entries",
-					                     port, fpgaA, fpgaB));
+					slice->SetTitle(Form("#Deltat global FEB ID %d FPGA %d - FPGA %d;#Deltat [ns];Entries",
+					                     globalFeb, fpgaA, fpgaB));
 					timingSlices_.emplace_back(slice);
 					c->cd(fpgaA * 4 + fpgaB + 1);
 					slice->Draw("HIST");
