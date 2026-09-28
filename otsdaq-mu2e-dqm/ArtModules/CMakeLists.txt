@@ -177,6 +177,18 @@ ROOT::RIO
 ROOT::Gui
 )
 
+# Add beside TrackerDQM in otsdaq-mu2e-dqm/ArtModules/CMakeLists.txt.
+cet_build_plugin(TrackerHitOccupancy art::module LIBRARIES REG
+  art_root_io::TFileService_service
+  otsdaq-mu2e::ArtModules
+  otsdaq::NetworkUtilities
+  Offline::DataProducts
+  Offline::RecoDataProducts
+  ROOT::Hist
+  ROOT::Core
+  ROOT::RIO
+)
+
 install_headers()
 install_source()
 install_fhicl(SUBDIRS fcl)
