@@ -1,0 +1,50 @@
+# Tracker fragment unpacking and hit reconstruction for occupancy DQM.
+# See tracker_hit_services.fcl for source provenance.
+physics.producers: {
+ProcessCFOData: {
+            cfoTag: "daq:CFO"
+            createEWM: true
+            diagLevel: 0
+            module_type: "EventHeaderFromCFOFragment"
+         }
+
+TrigMakeSD: {
+            allowOfflineFallbackWhenPanelMapMissing: false
+            debugBits: [
+               "bit0:0",
+               "bit1:0"
+            ]
+            debugMode: 0
+            diagLevel: 0
+            forceOfflineAddressing: false
+            # MN IDs identify panels despite source_dtc_id=0 in current raw data.
+            keyOnMnid: true
+            missingDTCHeaders: false
+            module_type: "StrawDigisFromArtdaqFragments"
+            saveWaveforms: false
+         }
+
+TrigComMakeSH: {
+            CaloClusterCollectionTag: "notUsed"
+            EventWindowMarker: "ProcessCFOData"
+            FilterHits: false
+            FitType: 5
+            FlagCrossTalk: false
+            MaximumEnergy: 5e-3
+            MaximumRadius: 750
+            MaximumTime: 200000
+            MinimumEnergy: 5e-4
+            MinimumRadius: 350
+            MinimumTime: 0
+            ProtonBunchTimeTag: "ProcessCFOData"
+            StrawDigiADCWaveformCollectionTag: "notUsed"
+            StrawDigiCollectionTag: "TrigMakeSD"
+            UseCalorimeter: false
+            WriteStrawHitCollection: true
+            clusterDt: 100
+            crossTalkEnergy: 7e-3
+            crossTalkMaximumTime: 100
+            crossTalkMinimumTime: -1
+            module_type: "StrawHitReco"
+         }
+}

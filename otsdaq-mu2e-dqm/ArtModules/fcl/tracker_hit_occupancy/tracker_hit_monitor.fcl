@@ -1,0 +1,19 @@
+# Common reconstruction and analysis, used by both replay and Dispatcher jobs.
+# Reconstruction uses the shared Offline panel map and DQM calibration settings.
+#include "otsdaq-mu2e-dqm/tracker_hit_occupancy/tracker_hit_services.fcl"
+#include "otsdaq-mu2e-dqm/tracker_hit_occupancy/tracker_hit_producers.fcl"
+
+process_name: TrackerHitMonitor
+services.TFileService: { fileName: "tracker-hit-occupancy.root" }
+services.message: { destinations: { console: { type: "cout" threshold: "WARNING" } } }
+physics.analyzers.occupancy: {
+  module_type: TrackerHitOccupancy
+  hits: "TrigComMakeSH"
+  publish: false
+  publishEvery: 100
+  directory: "TrackerHitOccupancy"
+}
+physics.reconstruct: [ProcessCFOData, TrigMakeSD, TrigComMakeSH]
+physics.monitor: [occupancy]
+physics.trigger_paths: [reconstruct]
+physics.end_paths: [monitor]

@@ -1,0 +1,1035 @@
+# Tracker hit DQM services.
+# Geometry and calibration settings originate from the validated trigger configuration.
+# Panel mapping is supplied by the installed Offline conditions file by run number.
+services: {
+GeometryService: {
+         KinKalMaterial: {
+            CRVMaterialName: "CRVModule"
+            ElectronBrehmsFraction: 3e-2
+            GasScatteringFraction: 9.999999e-1
+            IPAMaterialName: "HDPE"
+            IonizationEnergyLossMode: 1
+            STMaterialName: "Target"
+            SolidScatteringFraction: 9.99999e-1
+            elements: "Offline/TrackerConditions/data/ElementsList.data"
+            isotopes: "Offline/TrackerConditions/data/IsotopesList.data"
+            materials: "Offline/TrackerConditions/data/MaterialsList.data"
+            strawGasMaterialName: "straw-gas"
+            strawWallMaterialName: "straw-wall"
+            strawWireMaterialName: "straw-wire"
+         }
+         bFieldFile: "Offline/Mu2eG4/geom/bfgeom_reco_v01.txt"
+         inputFile: "Offline/Mu2eG4/geom/geom_common.txt"
+         simulatedDetector: {
+            tool_type: "Mu2e"
+         }
+      }
+
+GlobalConstantsService: {
+         inputFile: "Offline/GlobalConstantsService/data/globalConstants_01.txt"
+      }
+
+DbService: {
+         dbName: "mu2e_conditions_prd"
+         purpose: "EMPTY"
+         textFile: [
+            "TrkPreampStraw_117.txt",
+            "TrkAlignTracker_138.txt",
+            "TrkAlignPlane_139.txt",
+            "TrkAlignPanel_140.txt",
+            "TrkAlignStraw_171.txt",
+            "TrkPanelStatus_110.txt",
+            "TrkPlaneStatus_109.txt",
+            "TrkStrawStatusShort_112.txt",
+            "TrkStrawStatusLong_111.txt",
+            "TrkDelayRStraw_41.txt",
+            "CRVBadChan_296.txt",
+            "CRVSiPM_294.txt",
+            "CRVPhoton_188.txt",
+            "CRVTime_295.txt",
+            "TrkDelayPanel_19.txt",
+            "Offline/TrackerConditions/data/TrkPanelMap.txt"
+         ]
+         verbose: 0
+         version: "v0"
+      }
+
+ProditionsService: {
+
+         alignedTracker: {
+            onlyWireOffsets: false
+            useDb: true
+            verbose: 0
+         }
+         alignedTrackerSim: {
+            onlyWireOffsets: true
+            useDb: true
+            verbose: 0
+         }
+         calCalib: {
+            ADC2MeVCsI: 6.25e-2
+            ADC2MeVlyso: 3.75e-3
+            timeoffset: 0
+            useDb: false
+            verbose: 0
+         }
+         calDAQConditions: {
+            fileSpec: "Offline/CaloConditions/data/nominal.txt"
+            useDb: false
+            verbose: 0
+         }
+         calSimParams: {
+            fileName: "Offline/CaloConditions/data/Sim_crystal.txt"
+            useDb: false
+            verbose: 0
+         }
+         crvCalib: {
+            pedestal: 100
+            pulseArea: 3.946e2
+            pulseHeight: 1.14e1
+            timeOffset: 0
+            useDb: true
+            verbose: 0
+         }
+         crvOrdinal: {
+            filePath: "Offline/CRVConditions/data"
+            useDb: false
+            verbose: 0
+         }
+         crvPhotonYield: {
+            useDb: true
+            verbose: 0
+         }
+         crvStatus: {
+            status: []
+            useDb: true
+            verbose: 0
+         }
+         eventTiming: {
+            OffSpillEventLength: 4000
+            TimeFromProtonsToDRMarker: 200
+            useDb: false
+            verbose: 0
+         }
+         fullReadoutStraw: {
+            straws: []
+            useDb: false
+            verbose: 0
+         }
+         simbookkeeper: {
+            simStageEfficiencies: [
+               {
+                  eff: 6.68017e-1
+                  tag: "dsRegionPerPOT"
+               },
+               {
+                  eff: 1.80513e-1
+                  tag: "muBeamPerPOT"
+               },
+               {
+                  eff: 8.01518e-3
+                  tag: "flashPerMuBeam"
+               },
+               {
+                  eff: 1.38571e-3
+                  tag: "muStopPerPOT"
+               }
+            ]
+            useDb: false
+            verbose: 1
+         }
+         stmEnergyCalib: {
+            pedestals: [
+               [
+                  "HPGe",
+                  0
+               ],
+               [
+                  "LaBr",
+                  0
+               ]
+            ]
+            samplingFrequencies: [
+               [
+                  "HPGe",
+                  320
+               ],
+               [
+                  "LaBr",
+                  3.7037037037e2
+               ]
+            ]
+            useDb: false
+            verbose: 0
+         }
+         strawDrift: {
+            cmus: [
+               1.57,
+               1.9,
+               2.26,
+               2.65,
+               3.05,
+               3.47,
+               3.84,
+               4.25,
+               4.58,
+               4.91,
+               5.15,
+               5.36,
+               5.56,
+               5.68,
+               5.77,
+               5.92,
+               5.98,
+               6.02,
+               6.02,
+               6.09,
+               6.19,
+               6.35,
+               6.48,
+               6.64,
+               6.72,
+               6.83,
+               6.87,
+               6.89,
+               6.85,
+               6.85
+            ]
+            deltaDistance: 1e-3
+            deltaTime: 5e-2
+            driftIntegrationBins: 50
+            kVcm: [
+               4.2e-1,
+               4.9e-1,
+               5.59e-1,
+               6.29e-1,
+               6.99e-1,
+               7.69e-1,
+               8.39e-1,
+               9.09e-1,
+               9.79e-1,
+               1.049,
+               1.119,
+               1.189,
+               1.259,
+               1.329,
+               1.399,
+               1.573,
+               1.748,
+               1.923,
+               2.098,
+               2.448,
+               2.797,
+               3.147,
+               3.497,
+               3.846,
+               4.196,
+               4.545,
+               4.895,
+               5.245,
+               5.735,
+               500
+            ]
+            phiBins: 20
+            useDb: false
+            verbose: 0
+            wireVoltage: 1400
+         }
+         strawElectronics: {
+            ADCLSB: 1.953125
+            ADCOffset: 2
+            ADCPeriod: 20
+            ADCPoles: [
+               160,
+               6,
+               1.45
+            ]
+            ADCZeros: [
+               2e-1
+            ]
+            TDCLSB: 1.953125e-2
+            TDCResolution: 1e-1
+            TOTLSB: 5
+            adcAnalogNoise: 9e-1
+            adcdVdI: []
+            clusterLookbackTime: 5
+            currentMeans: [
+               0,
+               -1.806e-1,
+               -3.613e-1,
+               -5.419e-1,
+               -7.226e-1
+            ]
+            currentNormalizations: [
+               1,
+               9.7931167e-1,
+               9.1455972e-1,
+               8.3082332e-1,
+               7.414788e-1
+            ]
+            currentSigmas: [
+               2.24,
+               2.24,
+               2.24,
+               2.24,
+               2.24
+            ]
+            currentT0s: [
+               8e-1,
+               1.26,
+               1.72,
+               2.17,
+               2.63
+            ]
+            deadTimeAnalog: 100
+            deadTimeDigital: 400
+            defaultAdcdVdI: 1.528e6
+            defaultDiscriminatorThreshold: 12
+            defaultThresholddVdI: 8.43e6
+            digitizationEnd: 1705
+            digitizationStart: 450
+            discriminatorThreshold: []
+            electronicsTimeDelay: 0
+            eventWindowMarkerROCJitter: 5e-1
+            maxADC: 1024
+            maxTOT: 15
+            maxThreshTimeSeparation: 2
+            nADCPackets: 1
+            nADCPresamples: 5
+            numTDCbits: 24
+            overrideDbTimeOffsets: false
+            preampPoles: [
+               160,
+               6
+            ]
+            preampToAdc1Poles: [
+               160,
+               6
+            ]
+            preampToAdc1Zeros: [
+               2e-1
+            ]
+            preampToAdc2Poles: [
+               1.45
+            ]
+            preampToAdc2Zeros: []
+            preampZeros: [
+               2e-1
+            ]
+            reflectionALength: 2568
+            reflectionFrac: 5.8e-1
+            reflectionTimeShift: 5.08
+            reflectionVelocity: 5.138e2
+            responseBins: 10000
+            sampleRate: 10
+            saturationSampleFactor: 25
+            saturationVoltage: 140
+            strawNoise: 1.25
+            thresholdAnalogNoise: 1.25
+            thresholddVdI: []
+            timeOffsetPanel: []
+            timeOffsetStrawCal: []
+            timeOffsetStrawHV: []
+            triggerHysteresis: 2
+            useDb: true
+            verbose: 0
+            wireDistances: [
+               0,
+               300,
+               600,
+               900,
+               1200
+            ]
+         }
+         strawPhysics: {
+            bFieldOverride: -1
+            clusterDriftPolynomial: [
+               0,
+               16
+            ]
+            driftTimeVariance: [
+               1.3,
+               5e-1
+            ]
+            electronCharge: 1.6e-7
+            gainRMSSlope: 8.09e-1
+            gasGain: 70000
+            ionizationEnergyTable: [
+               1.575962e1,
+               2.762967e1,
+               4.074e1,
+               5.981e1,
+               7.502e1,
+               9.1009e1,
+               1.24323e2,
+               1.4346e2,
+               4.2245e2,
+               4.7869e2,
+               5.3896e2,
+               6.1826e2,
+               6.861e2,
+               7.5574e2,
+               8.5477e2,
+               9.1803e2,
+               4.1208857e3,
+               4.4262296e3
+            ]
+            ionizedElectronKE: 0
+            meanFreePath: 3.57e-1
+            nGainGauss: 30
+            polyaA: 1.25
+            probPerCharge: [
+               6.56e-1,
+               1.5e-1,
+               6.4e-2,
+               3.5e-2,
+               2.25e-2,
+               1.55e-2,
+               1.05e-2,
+               8.1e-3,
+               6.1e-3,
+               4.9e-3,
+               3.9e-3,
+               3e-3,
+               2.5e-3,
+               2e-3,
+               1.6e-3,
+               1.2e-3,
+               9.5e-4,
+               7.5e-4
+            ]
+            propagationVelocity: 299
+            useDb: false
+            useNonLinearDrift: true
+            verbose: 0
+         }
+         strawResponse: {
+            centralWirePos: 65
+            dRdTScale: 1
+            defaultHalfPropVelocity: 100
+            defaultPeakMinusPedestalEnergyScale: 2e-3
+            driftIgnorePhi: false
+            driftOffBins: [
+               -2.5e-1,
+               3.25
+            ]
+            driftOffset: [
+               -2.38e-1,
+               -2.13e-1,
+               -1.89e-1,
+               -1.65e-1,
+               -1.41e-1,
+               -1.19e-1,
+               -9.74e-2,
+               -7.76e-2,
+               -5.97e-2,
+               -4.38e-2,
+               -3.01e-2,
+               -1.88e-2,
+               -9.9e-3,
+               -3.37e-3,
+               8.31e-4,
+               2.7e-3,
+               2.55e-3,
+               8.77e-4,
+               -2.73e-3,
+               -7.8e-3,
+               -1.37e-2,
+               -1.97e-2,
+               -2.51e-2,
+               -2.95e-2,
+               -3.33e-2,
+               -3.64e-2,
+               -3.9e-2,
+               -4.12e-2,
+               -4.3e-2,
+               -4.45e-2,
+               -4.6e-2,
+               -4.72e-2,
+               -4.82e-2,
+               -4.93e-2,
+               -5.01e-2,
+               -5.09e-2,
+               -5.2e-2,
+               -5.25e-2,
+               -5.33e-2,
+               -5.47e-2,
+               -5.55e-2,
+               -5.66e-2,
+               -5.79e-2,
+               -5.93e-2,
+               -6.04e-2,
+               -6.15e-2,
+               -6.3e-2,
+               -6.39e-2,
+               -6.53e-2,
+               -6.68e-2,
+               -6.84e-2,
+               -6.99e-2,
+               -7.11e-2,
+               -7.27e-2,
+               -7.38e-2,
+               -7.53e-2,
+               -7.71e-2,
+               -7.87e-2,
+               -8.07e-2,
+               -8.2e-2,
+               -8.34e-2,
+               -8.52e-2,
+               -8.66e-2,
+               -8.85e-2,
+               -8.99e-2,
+               -9.13e-2,
+               -9.27e-2,
+               -9.38e-2,
+               -9.51e-2,
+               -9.7e-2,
+               -9.8e-2,
+               -9.86e-2,
+               -9.99e-2,
+               -1.01e-1,
+               -1.02e-1,
+               -1.03e-1,
+               -1.04e-1,
+               -1.05e-1,
+               -1.06e-1,
+               -1.07e-1,
+               -1.08e-1,
+               -1.09e-1,
+               -1.1e-1,
+               -1.1e-1,
+               -1.11e-1,
+               -1.12e-1,
+               -1.12e-1,
+               -1.12e-1,
+               -1.12e-1,
+               -1.12e-1,
+               -1.12e-1,
+               -1.11e-1,
+               -1.1e-1,
+               -1.1e-1,
+               -1.07e-1,
+               -1.05e-1,
+               -1.03e-1,
+               -1.01e-1,
+               -9.84e-2,
+               -9.55e-2,
+               -9.23e-2,
+               -8.88e-2,
+               -8.52e-2,
+               -8.15e-2,
+               -7.74e-2,
+               -7.36e-2,
+               -6.93e-2,
+               -6.6e-2,
+               -6.16e-2,
+               -5.76e-2,
+               -5.37e-2,
+               -5.03e-2,
+               -4.63e-2,
+               -4.18e-2,
+               -3.81e-2,
+               -3.33e-2,
+               -2.98e-2,
+               -2.6e-2,
+               -2.18e-2,
+               -1.83e-2,
+               -1.47e-2,
+               -1.05e-2,
+               -6.48e-3,
+               -6.1e-3,
+               -1.57e-3,
+               2.42e-3,
+               6.87e-3,
+               1.45e-2,
+               2.62e-2,
+               3.99e-2,
+               5e-2,
+               6.25e-2,
+               7.5e-2,
+               9.38e-2,
+               1.13e-1,
+               1.38e-1,
+               1.63e-1,
+               1.88e-1,
+               2.13e-1,
+               2.38e-1
+            ]
+            driftRMSBins: [
+               0,
+               2.5
+            ]
+            eBinWidth: 1e-1
+            eBins: 59
+            eHalfPVScale: [
+               6.91e-1,
+               6.91e-1,
+               6.91e-1,
+               7.31e-1,
+               8.03e-1,
+               8.4e-1,
+               8.67e-1,
+               8.87e-1,
+               9.04e-1,
+               9.18e-1,
+               9.3e-1,
+               9.43e-1,
+               9.54e-1,
+               9.65e-1,
+               9.74e-1,
+               9.86e-1,
+               9.93e-1,
+               1,
+               1.009,
+               1.014,
+               1.02,
+               1.029,
+               1.034,
+               1.038,
+               1.044,
+               1.049,
+               1.058,
+               1.058,
+               1.065,
+               1.068,
+               1.069,
+               1.078,
+               1.076,
+               1.088,
+               1.09,
+               1.087,
+               1.09,
+               1.094,
+               1.097,
+               1.097,
+               1.089,
+               1.094,
+               1.097,
+               1.095,
+               1.092,
+               1.092,
+               1.098,
+               1.095,
+               1.103,
+               1.101,
+               1.106,
+               1.115,
+               1.114,
+               1.099,
+               1.117,
+               1.124,
+               1.13,
+               1.125,
+               1.16
+            ]
+            errorFactor: 1
+            linearDriftVelocity: 6.25e-2
+            llDriftTimeOffBins: [
+               0,
+               2.5
+            ]
+            llDriftTimeOffset: [
+               1.11554e1,
+               9.7117,
+               8.46101,
+               7.40197,
+               6.5166,
+               5.77992,
+               5.16645,
+               4.65334,
+               4.22141,
+               3.85509,
+               3.54197,
+               3.27219,
+               3.03799,
+               2.83321,
+               2.65291,
+               2.49318,
+               2.35082,
+               2.22326,
+               2.10839,
+               2.00445,
+               1.91,
+               1.82384,
+               1.74494,
+               1.67244,
+               1.6056,
+               1.54381
+            ]
+            llDriftTimeRMS: [
+               1.116622335e1,
+               9.72105201,
+               8.51525893,
+               7.50822903,
+               6.66623832,
+               5.96128477,
+               5.37011739,
+               4.87343018,
+               4.45519278,
+               4.10209468,
+               3.80308375,
+               3.54898307,
+               3.33217276,
+               3.14632578,
+               2.98618863,
+               2.84739914,
+               2.72633527,
+               2.61998952,
+               2.5258647,
+               2.44188728,
+               2.36633556,
+               2.29777996,
+               2.23503347,
+               2.17711044,
+               2.12319249,
+               2.07260008
+            ]
+            llDriftTimeRMSBins: [
+               0,
+               2.5
+            ]
+            peakMinusPedestalEnergyScale: []
+            rmsLongErrors: true
+            signedDriftRMS: [
+               1.6e-1,
+               1.6e-1,
+               1.6e-1,
+               1.6e-1,
+               1.6e-1
+            ]
+            strawHalfPropVelocity: []
+            strawLengthFactor: 9e-1
+            tdCentralRes: [
+               7.42564e1,
+               7.42564e1,
+               7.42564e1,
+               6.17574e1,
+               5.5602e1,
+               5.27235e1,
+               5.01056e1,
+               4.86748e1,
+               4.68374e1,
+               4.56831e1,
+               4.47303e1,
+               4.35795e1,
+               4.29621e1,
+               4.18427e1,
+               4.12092e1,
+               4.05468e1,
+               3.99888e1,
+               3.93458e1,
+               3.89888e1,
+               3.85862e1,
+               3.80267e1,
+               3.78514e1,
+               3.73503e1,
+               3.75752e1,
+               3.70629e1,
+               3.67771e1,
+               3.63548e1,
+               3.65917e1,
+               3.61298e1,
+               3.58741e1,
+               3.59195e1,
+               3.50278e1,
+               3.44885e1,
+               3.52898e1,
+               3.48833e1,
+               3.40712e1,
+               3.42877e1,
+               3.43935e1,
+               3.44055e1,
+               3.50469e1,
+               3.36655e1,
+               3.28297e1,
+               3.43856e1,
+               3.6121e1,
+               3.32945e1,
+               3.39505e1,
+               3.39454e1,
+               3.30114e1,
+               3.40775e1,
+               3.34312e1,
+               3.14984e1,
+               3.17544e1,
+               3.4172e1,
+               3.34761e1,
+               3.33159e1,
+               3.33004e1,
+               3.34495e1,
+               3.1506e1,
+               3.21603e1
+            ]
+            tdResSlope: [
+               5.71992e-3,
+               5.71992e-3,
+               5.71992e-3,
+               7.39071e-2,
+               6.85885e-2,
+               6.47137e-2,
+               6.69334e-2,
+               6.14503e-2,
+               6.25388e-2,
+               5.93293e-2,
+               5.67595e-2,
+               5.59269e-2,
+               5.09541e-2,
+               5.14417e-2,
+               4.90053e-2,
+               4.4666e-2,
+               4.52655e-2,
+               4.57525e-2,
+               4.15223e-2,
+               4.25142e-2,
+               4.0691e-2,
+               3.91693e-2,
+               4.16697e-2,
+               3.73214e-2,
+               3.94176e-2,
+               3.889e-2,
+               4.04102e-2,
+               3.97879e-2,
+               4.23069e-2,
+               4.61902e-2,
+               4.48854e-2,
+               5.14913e-2,
+               5.94551e-2,
+               5.50648e-2,
+               5.6485e-2,
+               7.10772e-2,
+               6.70975e-2,
+               5.98919e-2,
+               6.45311e-2,
+               5.93204e-2,
+               7.23293e-2,
+               7.05138e-2,
+               6.57311e-2,
+               5.59622e-2,
+               6.85536e-2,
+               6.04229e-2,
+               5.74693e-2,
+               6.3125e-2,
+               6.23292e-2,
+               5.08882e-2,
+               6.01387e-2,
+               6.62105e-2,
+               5.01727e-2,
+               5.81113e-2,
+               6.28786e-2,
+               6.15793e-2,
+               7.04129e-2,
+               8.17835e-2,
+               3.99332e-2
+            ]
+            timeOffsetPanel: []
+            timeOffsetStrawCal: []
+            timeOffsetStrawHV: []
+            totDriftError: [
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.123e1,
+               6.4,
+               5.13,
+               1.11e1,
+               1.11e1,
+               8.64,
+               8.54,
+               4.54,
+               5.34,
+               1.11e1,
+               7.59,
+               1.329e1,
+               3.66,
+               3.85,
+               6.74,
+               8.02,
+               9.29,
+               1.138e1,
+               1.585e1,
+               1.22e1,
+               7.28,
+               8.52,
+               8.17,
+               7.4,
+               8.19,
+               6.01,
+               6.38,
+               6.77,
+               6.74,
+               7.26,
+               1.11e1,
+               4.87,
+               5.09,
+               5.33,
+               6.09,
+               1.11e1,
+               3.74,
+               3.89,
+               3.99,
+               4.94,
+               1.11e1,
+               3.16,
+               3,
+               3.09,
+               4.05,
+               1.11e1,
+               2.1,
+               2.34,
+               2.52,
+               3.66,
+               1.11e1,
+               1.11e1,
+               2.04,
+               2.44,
+               3.81,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               2.29,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1,
+               1.11e1
+            ]
+            totDriftTime: [
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               3.298e1,
+               1.547e1,
+               1.06e1,
+               1.918e1,
+               1.918e1,
+               3.602e1,
+               1.426e1,
+               9.44,
+               8.62,
+               1.918e1,
+               3.502e1,
+               24,
+               6.38,
+               6.99,
+               9.34,
+               3.143e1,
+               2.98e1,
+               2.894e1,
+               2.282e1,
+               1.223e1,
+               2.204e1,
+               2.304e1,
+               2.594e1,
+               2.757e1,
+               2.737e1,
+               1.733e1,
+               16,
+               1.733e1,
+               1.923e1,
+               2.045e1,
+               1.918e1,
+               1.162e1,
+               1.188e1,
+               1.27e1,
+               1.406e1,
+               1.918e1,
+               8.22,
+               8.01,
+               8.06,
+               9.2,
+               1.918e1,
+               5.45,
+               5.13,
+               4.83,
+               5.48,
+               1.918e1,
+               2.72,
+               2.92,
+               2.41,
+               3.58,
+               1.918e1,
+               1.918e1,
+               9.7e-1,
+               8.8e-1,
+               2.97,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               2.07,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1,
+               1.918e1
+            ]
+            totEBinWidth: 5e-4
+            totEBins: 5
+            totTBinWidth: 5
+            totTBins: 16
+            truncateLongitudinal: true
+            unsignedDriftRMS: [
+               1.2e-1,
+               1.2e-1,
+               1.2e-1,
+               1.2e-1,
+               1.2e-1
+            ]
+            useDb: false
+            useNonLinearDrift: true
+            verbose: 0
+            wireLengthBuffer: 2
+         }
+         # Load the run-dependent Offline TrkPanelMap through DbService.
+         # Empty arrays satisfy the configuration schema; useDb ignores them.
+         trackerPanelMap: {
+            useDb: true
+            verbose: 0
+            mnid: []
+            dtcid: []
+            link: []
+            uniquePlane: []
+            ppid: []
+            panel: []
+            zface: []
+         }
+         trackerStatus: {
+            Settings: {
+               useDb: true
+               verbose: 0
+            }
+            Status: []
+         }
+         trkQualCatalog: {
+            mvaConfigs: []
+            useDb: false
+            verbose: 1
+         }
+         verbose: 0
+      }
+}

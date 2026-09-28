@@ -1,0 +1,57 @@
+# Online tracker hit DQM; starting it registers a monitor with the Dispatcher.
+# Explicit TCP port 8331 is shared by sender and receiver across OTS partitions.
+# Dispatcher and histogram endpoints match the tracker OTS configuration.
+BEGIN_PROLOG
+TrackerMonitorTransfer: {
+  transferPluginType: TCPSocket
+  port: 8331
+  source_rank: 201
+  destination_rank: 100
+  max_fragment_size_words: 65338168
+  host_map: [
+    {rank: 201 host: "mu2e-dl-01-data.fnal.gov"},
+    {rank: 100 host: "mu2e-dl-01-data.fnal.gov"}
+  ]
+}
+END_PROLOG
+#include "otsdaq-mu2e-dqm/tracker_hit_occupancy/tracker_hit_monitor.fcl"
+services.ArtdaqFragmentNamingServiceInterface: {
+  service_provider: ArtdaqFragmentNamingService helper_plugin: Mu2e
+}
+services.ArtdaqSharedMemoryServiceInterface: { service_provider: ArtdaqGlobalsService }
+source: {
+  module_type: TransferInput
+  dispatcherHost: "mu2e-dl-01-data.fnal.gov"
+  dispatcherPort: "15980"
+  commanderPluginType: xmlrpc
+  dispatcherConnectTimeout: 30
+  transfer_plugin: @local::TrackerMonitorTransfer
+  dispatcher_config: {
+    unique_label: "TrackerHitOccupancy"
+    path: [trackerMonitorOutput]
+    filter_paths: []
+    services: {
+      ArtdaqSharedMemoryServiceInterface: {
+        service_provider: ArtdaqSharedMemoryService
+        waiting_time: 1 resume_after_timeout: true
+      }
+      ArtdaqFragmentNamingServiceInterface: {
+        service_provider: ArtdaqFragmentNamingService helper_plugin: Mu2e
+      }
+    }
+    source: { module_type: ArtdaqInput }
+    outputs: { trackerMonitorOutput: {
+      module_type: TransferOutput
+      outputCommands: ["keep *"]
+      transfer_plugin: @local::TrackerMonitorTransfer
+    } }
+    physics: { out: [trackerMonitorOutput] end_paths: [out] }
+    process_name: TrackerMonitorDispatch
+  }
+}
+physics.analyzers.occupancy.publish: true
+physics.analyzers.occupancy.address: "mu2e-dl-01-data.fnal.gov"
+physics.analyzers.occupancy.port: 6900
+physics.analyzers.occupancy.directory: "TrackerHitOccupancy"
+
+services.TFileService.fileName: "/scratch/mu2e/mu2eshift_dqm__trk/OutputData/tracker-hit-occupancy_%#.root"
