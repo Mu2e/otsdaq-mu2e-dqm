@@ -34,6 +34,7 @@
 #include "art_root_io/TFileService.h"
 
 // ROOT includes
+#include <TAxis.h>
 #include <TCanvas.h>
 #include <TColor.h>
 #include <TDirectory.h>
@@ -188,8 +189,12 @@ class CrvDQM : public art::EDAnalyzer
 	// Invalid (0xFFFF) link-latency words / status blocks, per link, over the
 	// rolling window when the status table keeps one, else over the run.
 	void updateInvalidLatencyRate();
-	// Display-only zoom of the global FEB axes onto the febIds that have data.
+	// Display-only zoom of every global FEB axis onto the febIds that have data.
 	void zoomToActiveGlobalFebs();
+	// Undo it. TAxis::SetRange is persisted, and the range-respecting accessors
+	// (Integral(), GetMean(), GetStdDev(), GetMaximum()) would then answer for the
+	// zoom, so the axes are put back to full range before the end-of-job write.
+	void unzoomGlobalFebAxes();
 	// Geometry + channel map -> the sector map and FEB topology the digi client
 	// needs for its per-sector occupancy and its partner-FEB timing. Redone on
 	// every new run, since the channel map can change between runs.
@@ -247,6 +252,9 @@ class CrvDQM : public art::EDAnalyzer
 	TCanvas*                                           webCanvas_;
 	THttpServer*                                       httpServer_;
 	std::chrono::time_point<std::chrono::steady_clock> lastRefreshTime_;
+	// Graphs that had no points when the canvas was built, and the pad each is
+	// waiting for. Drained by updateWebDisplay as the points arrive.
+	std::map<TGraph*, int>                             pendingGraphPads_;
 
 	// Event counter for display refresh (includes dummyHist events)
 	std::size_t eventCounts_{0};
@@ -646,6 +654,31 @@ void CrvDQM::updateLayout(art::Event const& event)
 	}
 }
 
+namespace {
+// Every axis the digi client indexes by global FEB ID: the histogram, which axis
+// carries it, and how many bins one FEB occupies there. Ranges are set by bin
+// number rather than by user coordinate, because the FEB axes are not all on the
+// same convention (Counts() is centred on the integer, the *Edges axes are not)
+// and a half-bin slip would drop a FEB.
+struct GlobalFebAxis
+{
+	const char* path;
+	int         axis;      // 0 = x, 1 = y
+	int         binsPerFeb;
+};
+const GlobalFebAxis kGlobalFebAxes[] = {
+    {"h1_channels", 0, mu2e::CRVDQMRun1::kNChanPerFEB},
+    {"h2_channels", 1, 1},
+    {"crvDigiRates", 1, 1},
+    {"dtFpgaPairs", 0, mu2e::CRVDQMRun1::kNFpgaPairs},
+    {"dtPartner_SameModuleSameSide", 0, 1},
+    {"dtPartner_SameModuleOtherSide", 0, 1},
+    {"dtPartner_AdjModuleSameSide", 0, 1},
+    {"dtPartner_AdjModuleOtherSide", 0, 1},
+    {"febNoGroup", 0, 1},
+};
+}  // namespace
+
 void CrvDQM::zoomToActiveGlobalFebs()
 {
 	const auto& febIds = dqm_.activeGlobalFebs();
@@ -654,13 +687,48 @@ void CrvDQM::zoomToActiveGlobalFebs()
 	// One FEB of margin, so an edge FEB going quiet is still visible.
 	const int lo = std::max(*febIds.begin() - 1, 0);
 	const int hi = std::min(*febIds.rbegin() + 1, mu2e::CRVDQMRun1::kNFebs - 1);
-	const int nChan = mu2e::CRVDQMRun1::kNChanPerFEB;
-	for(TH1* h : dqm_.hists().copies("h1_channels"))
-		h->GetXaxis()->SetRangeUser(lo * nChan - 0.5, (hi + 1) * nChan - 0.5);
-	for(TH1* h : dqm_.hists().copies("h2_channels"))
-		h->GetYaxis()->SetRangeUser(lo - 0.5, hi + 0.5);
-	if(TH1* h = jobCopy("dtPartner_SameModuleSameSide"))
-		h->GetXaxis()->SetRangeUser(lo - 0.5, hi + 0.5);
+
+	for(const auto& spec : kGlobalFebAxes)
+	{
+		for(TH1* h : dqm_.hists().copies(spec.path))
+		{
+			TAxis* a = (spec.axis == 0) ? h->GetXaxis() : h->GetYaxis();
+			a->SetRange(lo * spec.binsPerFeb + 1, (hi + 1) * spec.binsPerFeb);
+		}
+	}
+
+	// The per-ROC channel pages carry their own ROC's FEBs, so each gets its own
+	// range; a ROC with no hits is left full-range rather than shown empty-zoomed.
+	const int nFebPerRoc = mu2e::CRVDQMRun1::kNFebPerROC;
+	const int nChan      = mu2e::CRVDQMRun1::kNChanPerFEB;
+	for(int roc = 1; roc <= mu2e::CRVDQMRun1::kNROC; ++roc)
+	{
+		const int first = (roc - 1) * nFebPerRoc;
+		auto      it    = febIds.lower_bound(first);
+		if(it == febIds.end() || *it >= first + nFebPerRoc)
+			continue;
+		auto last = febIds.lower_bound(first + nFebPerRoc);
+		--last;
+		const int rocLo = std::max(*it - first - 1, 0);
+		const int rocHi = std::min(*last - first + 1, nFebPerRoc - 1);
+		for(TH1* h : dqm_.hists().copies(Form("crvDigiRates_ROC%d", roc)))
+			h->GetXaxis()->SetRange(rocLo * nChan + 1, (rocHi + 1) * nChan);
+	}
+}
+
+void CrvDQM::unzoomGlobalFebAxes()
+{
+	for(const auto& spec : kGlobalFebAxes)
+	{
+		for(TH1* h : dqm_.hists().copies(spec.path))
+		{
+			TAxis* a = (spec.axis == 0) ? h->GetXaxis() : h->GetYaxis();
+			a->SetRange(0, 0);
+		}
+	}
+	for(int roc = 1; roc <= mu2e::CRVDQMRun1::kNROC; ++roc)
+		for(TH1* h : dqm_.hists().copies(Form("crvDigiRates_ROC%d", roc)))
+			h->GetXaxis()->SetRange(0, 0);
 }
 
 void CrvDQM::startHttpServer()
@@ -693,6 +761,15 @@ void CrvDQM::startHttpServer()
 		auto drawGraph = [&](TGraph* g, int pad) {
 			if(g == nullptr)
 				return;
+			// ROOT's TGraphPainter raises a fatal error on a graph with no points,
+			// which art turns into an exception: startHttpServer() then leaves
+			// webCanvas_ null and the display is dead for the rest of the job.
+			// Hold the graph back and draw it on its first point instead.
+			if(g->GetN() == 0)
+			{
+				pendingGraphPads_[g] = pad;
+				return;
+			}
 			webCanvas_->cd(pad);
 			mu2e::DQMStyle::FormatGraph(g, histColor_);
 			if(TH1F* frame = g->GetHistogram())
@@ -834,6 +911,7 @@ void CrvDQM::stopHttpServer()
 		delete webCanvas_;
 		webCanvas_ = nullptr;
 	}
+	pendingGraphPads_.clear();
 }
 
 void CrvDQM::updateWebDisplay(bool force)
@@ -905,6 +983,21 @@ void CrvDQM::updateWebDisplay(bool force)
 				else
 					mu2e::DQMStyle::FormatHist(h, histColor_);
 			}
+		}
+
+		// Graphs the canvas could not draw yet: give each its pad on its first point.
+		for(auto it = pendingGraphPads_.begin(); it != pendingGraphPads_.end();)
+		{
+			if(it->first->GetN() == 0)
+			{
+				++it;
+				continue;
+			}
+			webCanvas_->cd(it->second);
+			mu2e::DQMStyle::FormatGraph(it->first, histColor_);
+			it->first->SetMarkerColor(it->first->GetLineColor());
+			it->first->Draw("AP");
+			it = pendingGraphPads_.erase(it);
 		}
 
 		TGraph* g_digisVsEwt    = digiGraph("g_digisVsEwt");
@@ -1224,6 +1317,9 @@ void CrvDQM::endJob()
 	{
 		stopHttpServer();
 	}
+
+	// TFileService writes after this returns, so drop the display zoom first.
+	unzoomGlobalFebAxes();
 }
 
 DEFINE_ART_MODULE(ots::CrvDQM)
