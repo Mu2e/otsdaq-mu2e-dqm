@@ -56,11 +56,11 @@
 // Offline includes
 #include "Offline/CRVConditions/inc/CRVOrdinal.hh"
 #include "Offline/CRVConditions/inc/CRVStatus.hh"
-#include "Offline/CosmicRayShieldGeom/inc/CosmicRayShield.hh"
 #include "Offline/CRVDQM/inc/CRVDQMLayout.hh"
 #include "Offline/CRVDQM/inc/CRVDQMRun1.hh"
 #include "Offline/CRVDQM/inc/CRVDigiDQM.hh"
 #include "Offline/CRVDQM/inc/CRVStatusDQM.hh"
+#include "Offline/CosmicRayShieldGeom/inc/CosmicRayShield.hh"
 #include "Offline/DQMHelpers/inc/DQMHistSetConfig.hh"
 #include "Offline/DQMHelpers/inc/DQMStyle.hh"
 #include "Offline/GeometryService/inc/GeomHandle.hh"
@@ -73,8 +73,8 @@ namespace
 // What the online display shows, declared once.
 struct HistPad
 {
-	const char* name;       // as mu2e::CRVDigiDQM books it
-	int         pad;        // 1-based canvas pad
+	const char* name;  // as mu2e::CRVDigiDQM books it
+	int         pad;   // 1-based canvas pad
 	const char* drawOpt;
 	bool        logx;
 	bool        logy;
@@ -110,11 +110,11 @@ constexpr double kEwtXRange = 1000000;
 // Keys the module took before the DQM clients fixed their binning. Rejected,
 // because a plain ParameterSet would otherwise ignore them silently.
 constexpr const char* kRemovedKeys[] = {
-    "cfFraction",     "minAmplitude",   "dtBinSize",          "dtRange",
-    "dtVsFebBinSize", "dtVsFebRange",   "nBinsDigisPerEvt",   "maxDigisPerEvt",
-    "nBinsPeakAdc",   "maxPeakAdc",     "nBinsTdc",           "maxTdc",
-    "avgBlockSize",   "avgGraphPoints", "channelsWindowEwts", "fillCrvIdRates",
-    "kppReadout",     "fillLivePlots",  "statusGraphs",       "maxLatencyGraphPoints",
+    "cfFraction",     "minAmplitude",      "dtBinSize",          "dtRange",
+    "dtVsFebBinSize", "dtVsFebRange",      "nBinsDigisPerEvt",   "maxDigisPerEvt",
+    "nBinsPeakAdc",   "maxPeakAdc",        "nBinsTdc",           "maxTdc",
+    "avgBlockSize",   "avgGraphPoints",    "channelsWindowEwts", "fillCrvIdRates",
+    "kppReadout",     "fillLivePlots",     "statusGraphs",       "maxLatencyGraphPoints",
     "segmentation",   "statusSegmentation"};
 
 void rejectRemovedKeys(fhicl::ParameterSet const& ps)
@@ -124,7 +124,8 @@ void rejectRemovedKeys(fhicl::ParameterSet const& ps)
 		if(ps.has_key(key))
 		{
 			throw cet::exception("CrvDQM")
-			    << "parameter \"" << key << "\" no longer exists: binning and CF timing are "
+			    << "parameter \"" << key
+			    << "\" no longer exists: binning and CF timing are "
 			    << "fixed in Offline/CRVDQM, and copies/publishing are chosen by the "
 			    << "`digi` and `status` tables (Offline/CRVDQM/fcl/prolog.fcl).\n";
 		}
@@ -135,7 +136,8 @@ void rejectRemovedKeys(fhicl::ParameterSet const& ps)
 mu2e::DQMHistSet::Config clientHists(fhicl::ParameterSet const& ps, const char* key)
 {
 	return mu2e::toConfig(
-	    fhicl::Table<mu2e::DQMClientFhicl>(ps.get<fhicl::ParameterSet>(key, {}))().hists());
+	    fhicl::Table<mu2e::DQMClientFhicl>(ps.get<fhicl::ParameterSet>(key, {}))()
+	        .hists());
 }
 
 // Workaround for ROOT fatal "TPad::Range: y1 == y2 == 0" on empty histograms drawn
@@ -254,7 +256,7 @@ class CrvDQM : public art::EDAnalyzer
 	std::chrono::time_point<std::chrono::steady_clock> lastRefreshTime_;
 	// Graphs that had no points when the canvas was built, and the pad each is
 	// waiting for. Drained by updateWebDisplay as the points arrive.
-	std::map<TGraph*, int>                             pendingGraphPads_;
+	std::map<TGraph*, int> pendingGraphPads_;
 
 	// Event counter for display refresh (includes dummyHist events)
 	std::size_t eventCounts_{0};
@@ -413,10 +415,12 @@ void CrvDQM::beginJob()
 			}
 		}
 		const mu2e::DQMAxis link = mu2e::CRVStatusDQM::kLink;
-		h_invalidLatencyRate_ = std::make_unique<TH1F>(
-		    "linkLatencyInvalidRate",
-		    "Invalid link-latency words / status blocks;DTC#times6 + link ID;Fraction",
-		    link.n, link.lo, link.hi);
+		h_invalidLatencyRate_    = std::make_unique<TH1F>(
+            "linkLatencyInvalidRate",
+            "Invalid link-latency words / status blocks;DTC#times6 + link ID;Fraction",
+            link.n,
+            link.lo,
+            link.hi);
 		h_invalidLatencyRate_->SetDirectory(nullptr);
 	}
 
@@ -496,7 +500,7 @@ void CrvDQM::Send()
 	if(!dummyHist_)
 	{
 		std::map<std::string, std::vector<TGraph*>> graphs;
-		auto& out = graphs["crv/graphs:replace"];
+		auto&                                       out = graphs["crv/graphs:replace"];
 		for(const auto* series : {&dqm_.series(), &statusDqm_.series()})
 			out.insert(out.end(), series->graphs().begin(), series->graphs().end());
 		if(!out.empty())
@@ -522,8 +526,8 @@ void CrvDQM::logPublished()
 	          << " HistoSender group(s):" << std::endl;
 	for(const auto& [group, copies] : published)
 	{
-		std::cout << outputPrefix_ << "  crv/" << group << ":replace  ("
-		          << copies.size() << ")";
+		std::cout << outputPrefix_ << "  crv/" << group << ":replace  (" << copies.size()
+		          << ")";
 		// Naming every member of a large group helps nobody.
 		if(copies.size() <= 8)
 		{
@@ -532,7 +536,8 @@ void CrvDQM::logPublished()
 		}
 		std::cout << std::endl;
 	}
-	std::cout << outputPrefix_ << "  crv/linkLatencyInvalidRate:replace  (1)" << std::endl;
+	std::cout << outputPrefix_ << "  crv/linkLatencyInvalidRate:replace  (1)"
+	          << std::endl;
 }
 
 TH1* CrvDQM::jobCopy(const char* name)
@@ -541,10 +546,7 @@ TH1* CrvDQM::jobCopy(const char* name)
 	return copies.empty() ? nullptr : copies.front();
 }
 
-TGraph* CrvDQM::digiGraph(const char* name)
-{
-	return dqm_.series().get(name).graph();
-}
+TGraph* CrvDQM::digiGraph(const char* name) { return dqm_.series().get(name).graph(); }
 
 void CrvDQM::registerNewStatusObjects()
 {
@@ -587,9 +589,9 @@ void CrvDQM::updateInvalidLatencyRate()
 {
 	if(!h_invalidLatencyRate_)
 		return;
-	TH1* invalid = statusDqm_.hists().live("linkLatencyInvalid");
-	TH1* blocks  = statusDqm_.hists().live("statusBlocksByLink");
-	const bool window = invalid != nullptr && blocks != nullptr;
+	TH1*       invalid = statusDqm_.hists().live("linkLatencyInvalid");
+	TH1*       blocks  = statusDqm_.hists().live("statusBlocksByLink");
+	const bool window  = invalid != nullptr && blocks != nullptr;
 	if(!window)
 	{
 		invalid = statusDqm_.linkLatencyInvalid();
@@ -635,12 +637,14 @@ void CrvDQM::updateLayout(art::Event const& event)
 
 		std::vector<mu2e::CRVDigiDQM::FebTopology> topology;
 		std::vector<int>                           channelToLayer;
-		mu2e::CRVDQMLayout::febTopology(*crs, channelMap_.get(event.id()), topology,
-		                                channelToLayer);
+		mu2e::CRVDQMLayout::febTopology(
+		    *crs, channelMap_.get(event.id()), topology, channelToLayer);
 		dqm_.SetFebTopology(topology, channelToLayer);
-		std::cout << outputPrefix_ << "run " << layoutRun_ << ": CRV layout from geometry \""
-		          << crs->getName() << "\" (configuration "
-		          << mu2e::CRVDQMRun1::configurationName(configuration) << ")" << std::endl;
+		std::cout << outputPrefix_ << "run " << layoutRun_
+		          << ": CRV layout from geometry \"" << crs->getName()
+		          << "\" (configuration "
+		          << mu2e::CRVDQMRun1::configurationName(configuration) << ")"
+		          << std::endl;
 	}
 	catch(const std::exception& e)
 	{
@@ -649,12 +653,14 @@ void CrvDQM::updateLayout(art::Event const& event)
 			warnedLayout_ = true;
 			std::cout << outputPrefix_ << "ERROR: no CRV layout (" << e.what()
 			          << "); crvDigisPerChannelAndEvent_* and the partner-FEB timing "
-			          << "(dtPartner_*, febNoGroup, groupsPerEvent) stay EMPTY" << std::endl;
+			          << "(dtPartner_*, febNoGroup, groupsPerEvent) stay EMPTY"
+			          << std::endl;
 		}
 	}
 }
 
-namespace {
+namespace
+{
 // Every axis the digi client indexes by global FEB ID: the histogram, which axis
 // carries it, and how many bins one FEB occupies there. Ranges are set by bin
 // number rather than by user coordinate, because the FEB axes are not all on the
@@ -663,7 +669,7 @@ namespace {
 struct GlobalFebAxis
 {
 	const char* path;
-	int         axis;      // 0 = x, 1 = y
+	int         axis;  // 0 = x, 1 = y
 	int         binsPerFeb;
 };
 const GlobalFebAxis kGlobalFebAxes[] = {
@@ -864,7 +870,7 @@ void CrvDQM::startHttpServer()
 	// handed to SetDefaultPage, which would silently serve nothing.
 	if(!httpDefaultPage_.empty())
 	{
-		std::string page = httpDefaultPage_;
+		std::string       page  = httpDefaultPage_;
 		const std::string token = "$OTS_SOURCE";
 		if(const size_t at = page.find(token); at != std::string::npos)
 		{
@@ -884,7 +890,8 @@ void CrvDQM::startHttpServer()
 		if(!page.empty() && gSystem->AccessPathName(page.c_str()))
 		{
 			std::cout << outputPrefix_ << "httpDefaultPage " << page
-			          << " does not exist; serving the built-in THttpServer page" << std::endl;
+			          << " does not exist; serving the built-in THttpServer page"
+			          << std::endl;
 			page.clear();
 		}
 
@@ -1029,8 +1036,8 @@ void CrvDQM::updateWebDisplay(bool force)
 			// autoRangeGraphY may make TGraph::GetHistogram() recreate the frame,
 			// whose X limits then default to the data range; keep the sliding window.
 			double currentEwt = static_cast<double>(dqm_.lastEwt());
-			double xLo = std::max(0.0, currentEwt - kEwtXRange);
-			double xHi = currentEwt;
+			double xLo        = std::max(0.0, currentEwt - kEwtXRange);
+			double xHi        = currentEwt;
 			if(xHi <= xLo)
 				xHi = xLo + 1.0;
 			if(TH1F* frame = g_digisVsEwt->GetHistogram())
@@ -1098,7 +1105,7 @@ void CrvDQM::analyze(art::Event const& event)
 		art::Handle<mu2e::CrvDigiCollection> crvDigisHandle;
 		event.getByLabel(crvDigiTag_, crvDigisHandle);
 
-		const mu2e::CrvDigiCollection emptyDigis;
+		const mu2e::CrvDigiCollection  emptyDigis;
 		const mu2e::CrvDigiCollection& crvDigis =
 		    (crvDigisHandle.isValid() && crvDigisHandle.product() != nullptr)
 		        ? *crvDigisHandle
@@ -1118,7 +1125,7 @@ void CrvDQM::analyze(art::Event const& event)
 
 		art::Handle<mu2e::CrvStatusCollection> crvStatusHandle;
 		event.getByLabel(crvStatusTag_, crvStatusHandle);
-		const mu2e::CrvStatusCollection emptyStatus;
+		const mu2e::CrvStatusCollection  emptyStatus;
 		const mu2e::CrvStatusCollection& crvStatus =
 		    (crvStatusHandle.isValid() && crvStatusHandle.product() != nullptr)
 		        ? *crvStatusHandle
@@ -1133,8 +1140,8 @@ void CrvDQM::analyze(art::Event const& event)
 	///////////////////// Send /////////////////////
 
 	// Send histograms in fixed time intervals
-	auto                             currentTime = std::chrono::steady_clock::now();
-	std::chrono::duration<double> elapsed = currentTime - lastSendTime_;
+	auto                          currentTime = std::chrono::steady_clock::now();
+	std::chrono::duration<double> elapsed     = currentTime - lastSendTime_;
 
 	if(elapsed.count() >= sendIntervalSec_)
 	{
@@ -1160,14 +1167,14 @@ void CrvDQM::analyze(art::Event const& event)
 		          << ", gateB=" << statUpdateGateB_ << "), "
 		          << "gSystem->ProcessEvents=" << (statProcEvents_ / dt) << " Hz, "
 		          << "sendHistograms=" << (statSend_ / dt) << " Hz" << std::endl;
-		statAnalyze_       = 0;
-		statUpdate_        = 0;
-		statUpdateCalls_   = 0;
-		statUpdateGateA_   = 0;
-		statUpdateGateB_   = 0;
-		statProcEvents_    = 0;
-		statSend_          = 0;
-		statLastLog_       = currentTime;
+		statAnalyze_     = 0;
+		statUpdate_      = 0;
+		statUpdateCalls_ = 0;
+		statUpdateGateA_ = 0;
+		statUpdateGateB_ = 0;
+		statProcEvents_  = 0;
+		statSend_        = 0;
+		statLastLog_     = currentTime;
 	}
 }
 
@@ -1178,12 +1185,14 @@ void CrvDQM::endJob()
 		// Print job-level statistics
 		std::cout << outputPrefix_
 		          << "================= End job summary =================" << std::endl;
-		std::cout << outputPrefix_ << "Total events: "
-		          << (dummyHist_ ? eventCounts_ : dqm_.nEvents()) << std::endl;
+		std::cout << outputPrefix_
+		          << "Total events: " << (dummyHist_ ? eventCounts_ : dqm_.nEvents())
+		          << std::endl;
 		if(!dummyHist_)
 		{
 			std::cout << outputPrefix_ << "Total digis: " << dqm_.nDigis() << std::endl;
-			std::cout << outputPrefix_ << "Active global FEB IDs: " << dqm_.activeGlobalFebs().size()
+			std::cout << outputPrefix_
+			          << "Active global FEB IDs: " << dqm_.activeGlobalFebs().size()
 			          << std::endl;
 			// Print FEBs per ROC
 			for(auto& [roc, febs] : dqm_.rocFEBMap())
@@ -1241,20 +1250,22 @@ void CrvDQM::endJob()
 	{
 		using mu2e::CRVDQMRun1::fpgaPairIndex;
 		using mu2e::CRVDQMRun1::kNFpgaPairs;
-		TH2F* pairs = dqm_.dtFpgaPairs();
+		TH2F*               pairs = dqm_.dtFpgaPairs();
 		art::TFileDirectory canvasDir =
 		    tfs_->mkdir(outputTag_).mkdir("timing_feb_canvases");
 
 		for(int globalFeb = 0; globalFeb < mu2e::CRVDQMRun1::kNFebs; ++globalFeb)
 		{
 			const int firstCol = globalFeb * kNFpgaPairs + 1;
-			if(pairs->Integral(firstCol, firstCol + kNFpgaPairs - 1, 0, pairs->GetNbinsY() + 1) <= 0.)
+			if(pairs->Integral(
+			       firstCol, firstCol + kNFpgaPairs - 1, 0, pairs->GetNbinsY() + 1) <= 0.)
 				continue;
 			const int   roc    = globalFeb / mu2e::CRVDQMRun1::kNFebPerROC + 1;
 			const int   feb    = globalFeb % mu2e::CRVDQMRun1::kNFebPerROC + 1;
 			std::string cName  = Form("c_timing_feb%03d", globalFeb);
-			std::string cTitle = Form("FPGA timing, global FEB ID %d (ROC %d FEB %d)", globalFeb, roc, feb);
-			TCanvas*    c =
+			std::string cTitle = Form(
+			    "FPGA timing, global FEB ID %d (ROC %d FEB %d)", globalFeb, roc, feb);
+			TCanvas* c =
 			    canvasDir.make<TCanvas>(cName.c_str(), cTitle.c_str(), 1200, 1200);
 			TDirectory* saveDir = gDirectory;
 			c->Divide(4, 4);
@@ -1265,12 +1276,18 @@ void CrvDQM::endJob()
 				{
 					if(!showSameFpgaTimingInCanvas_ && fpgaA == fpgaB)
 						continue;
-					const int col = globalFeb * kNFpgaPairs + fpgaPairIndex(fpgaA, fpgaB) + 1;
+					const int col =
+					    globalFeb * kNFpgaPairs + fpgaPairIndex(fpgaA, fpgaB) + 1;
 					TH1* slice = pairs->ProjectionY(
-					    Form("dt_feb%03d_fpga%d_fpga%d", globalFeb, fpgaA, fpgaB), col, col);
+					    Form("dt_feb%03d_fpga%d_fpga%d", globalFeb, fpgaA, fpgaB),
+					    col,
+					    col);
 					slice->SetDirectory(nullptr);
-					slice->SetTitle(Form("#Deltat global FEB ID %d FPGA %d - FPGA %d;#Deltat [ns];Entries",
-					                     globalFeb, fpgaA, fpgaB));
+					slice->SetTitle(Form(
+					    "#Deltat global FEB ID %d FPGA %d - FPGA %d;#Deltat [ns];Entries",
+					    globalFeb,
+					    fpgaA,
+					    fpgaB));
 					timingSlices_.emplace_back(slice);
 					c->cd(fpgaA * 4 + fpgaB + 1);
 					slice->Draw("HIST");
