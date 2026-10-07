@@ -192,3 +192,4 @@ cet_build_plugin(TrackerHitOccupancy art::module LIBRARIES REG
 install_headers()
 install_source()
 install_fhicl(SUBDIRS fcl)
+install_fhicl(SUBDIRS fcl/tracker_hit_occupancy SUBDIRNAME otsdaq-mu2e-dqm/tracker_hit_occupancy)
