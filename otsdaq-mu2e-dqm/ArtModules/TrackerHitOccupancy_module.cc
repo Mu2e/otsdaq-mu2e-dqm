@@ -35,9 +35,9 @@ class TrackerHitOccupancy : public art::EDAnalyzer
 		fhicl::Atom<int>           port{fhicl::Name("port"), 0};
 		fhicl::Atom<unsigned>      publishEvery{fhicl::Name("publishEvery"), 100};
 		// Minimum reconstructed energy deposit in MeV; zero disables the cut.
-		fhicl::Atom<double>        minEDep{fhicl::Name("minEDep"), 0.0};
-		fhicl::Atom<std::string>   directory{fhicl::Name("directory"),
-                                           "TrackerHitOccupancy"};
+		fhicl::Atom<double>      minEDep{fhicl::Name("minEDep"), 0.0};
+		fhicl::Atom<std::string> directory{fhicl::Name("directory"),
+		                                   "TrackerHitOccupancy"};
 	};
 	using Parameters = art::EDAnalyzer::Table<Config>;
 	explicit TrackerHitOccupancy(Parameters const& p)
