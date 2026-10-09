@@ -83,3 +83,22 @@ $ mz
 - The Histograms have there own class - ProtoTypeHist - in there you have to book and initiate all the RootObjects.
 - The Consumer for this example is in DataProcessorPlugins -  see dqmMu2eHistoConsumer_processor.cc to see how the consumer reads the root object using only the name. You must have a class member of the same type as you filled in you module. There is o need to rename or rebook (that's why we have the class). 
 - To add in Mu2e DataProducts you need to make sure you add in the Mu2e libraries- see ArtModule/CMakeList for examples.
+
+## CRV DQM
+
+`CrvDQM` (digis and per-link status, THttpServer page plus HistoSender) and
+`CrvStatusMetrics` (artdaq LastPoint metrics) moved here from otsdaq-mu2e-crv,
+which keeps the CRV front-end interfaces, table plugins and viewer.
+
+Neither module books or fills a histogram. The histogram sets, their fixed
+binning and the fills all live in `Offline/CRVDQM`, built on the generic
+`Offline/DQMHelpers` core, so the same client classes run here and in the
+offline art jobs in [Mu2e/DQM](https://github.com/Mu2e/DQM);
+the binning is fixed so that the two can be merged and compared across a run
+period. What each module publishes is chosen by its `digi` and `status` FHiCL
+tables, whose presets are in `Offline/CRVDQM/fcl/prolog.fcl`. Read
+`Offline/CRVDQM/README.md` before changing either module, and note that
+changing binning is a versioned operation described there.
+
+Job fcl: `ArtModules/fcl/RunCrvDQM.fcl` (online)
+
