@@ -178,8 +178,9 @@ void CrvStatusMetrics::sendMetric(const std::string& name,
 	}
 }
 
-void CrvStatusMetrics::sendErrorMetrics(const mu2e::CrvStatusCollection&   crvStatus,
-                                        const mu2e::CrvDAQerrorCollection* crvDaqErrors) const
+void CrvStatusMetrics::sendErrorMetrics(
+    const mu2e::CrvStatusCollection&   crvStatus,
+    const mu2e::CrvDAQerrorCollection* crvDaqErrors) const
 {
 	using mu2e::CRVStatusDQM;
 	uint64_t firmware[CRVStatusDQM::kNErrorBits] = {};
@@ -209,9 +210,13 @@ void CrvStatusMetrics::sendErrorMetrics(const mu2e::CrvStatusCollection&   crvSt
 	const auto sum = artdaq::MetricMode::RunningSum;
 	for(int b : kHardwareBits)
 		sendMetric(std::string("CRV.Errors.Hardware.") + CRVStatusDQM::errorBitLabel(b),
-		           firmware[b], "counts", sum);
+		           firmware[b],
+		           "counts",
+		           sum);
 	for(int i = 0; i < kNLinkStatusBits; ++i)
-		sendMetric(std::string("CRV.Errors.Link.") + kLinkStatusBitNames[i], link[i], "counts",
+		sendMetric(std::string("CRV.Errors.Link.") + kLinkStatusBitNames[i],
+		           link[i],
+		           "counts",
 		           sum);
 	sendMetric("CRV.Errors.Link.LatencyInvalid", latencyInvalid, "counts", sum);
 	sendMetric("CRV.Errors.DAQ.RocDtcEwtMismatch", ewtMismatch, "counts", sum);
@@ -266,8 +271,8 @@ void CrvStatusMetrics::analyze(art::Event const& e)
 		{
 			++noStatusCount_;
 			if(diagLevel_ > 1)
-				std::cout << outputPrefix_ << e.id() << " no CrvStatus at " << crvStatusTag_
-				          << "; no error metrics" << std::endl;
+				std::cout << outputPrefix_ << e.id() << " no CrvStatus at "
+				          << crvStatusTag_ << "; no error metrics" << std::endl;
 		}
 	}
 

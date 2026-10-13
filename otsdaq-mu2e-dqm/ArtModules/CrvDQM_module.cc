@@ -664,7 +664,8 @@ void CrvDQM::updateLayout(art::Event const& event)
 		          << mu2e::CRVDQMRun1::configurationName(configuration) << ")"
 		          << std::endl;
 		if(configuration != configuration_)
-			std::cout << outputPrefix_ << "ERROR: the clients were booked for configuration \""
+			std::cout << outputPrefix_
+			          << "ERROR: the clients were booked for configuration \""
 			          << mu2e::CRVDQMRun1::configurationName(configuration_)
 			          << "\" (fcl `configuration`) but the geometry names \""
 			          << mu2e::CRVDQMRun1::configurationName(configuration)
