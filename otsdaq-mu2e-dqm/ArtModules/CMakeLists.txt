@@ -210,17 +210,10 @@ ROOT::RHTTP
 )
 
 cet_build_plugin(CrvStatusMetrics art::module LIBRARIES REG
-art_root_io::TFileService_service
-artdaq-core-mu2e::Overlays
-artdaq-core-mu2e::Data
 artdaq::DAQdata
 artdaq-utilities::Plugins
-otsdaq-mu2e::ArtModules
-otsdaq::NetworkUtilities
 Offline::CRVDQM
-Offline::DQMHelpers
 Offline::RecoDataProducts
-ROOT::Hist
 ROOT::Core
 )
 

@@ -87,17 +87,23 @@ $ mz
 ## CRV DQM
 
 `CrvDQM` (digis and per-link status, THttpServer page plus HistoSender) and
-`CrvStatusMetrics` (artdaq LastPoint metrics) moved here from otsdaq-mu2e-crv,
-which keeps the CRV front-end interfaces, table plugins and viewer.
+`CrvStatusMetrics` (graphite metrics via the artdaq MetricManager: error
+counts per type as running sums, digis per event per global FEB as averages;
+no histograms) live here. otsdaq-mu2e-crv keeps
+the CRV front-end interfaces, table plugins and viewer, plus
+`fcl/CrvDQM_online.fcl`, the prolog aliases (`crvDqmOnlineDigi`,
+`crvDqmOnlineStatus`) that the OTS configuration database references for the
+`digi` and `status` tables. The old copies of both modules are in
+otsdaq-mu2e-crv's `ArtModules/attic/`.
 
-Neither module books or fills a histogram. The histogram sets, their fixed
+`CrvDQM` books and fills no histogram itself. The histogram sets, their fixed
 binning and the fills all live in `Offline/CRVDQM`, built on the generic
 `Offline/DQMHelpers` core, so the same client classes run here and in the
 offline art jobs in [Mu2e/DQM](https://github.com/Mu2e/DQM);
 the binning is fixed so that the two can be merged and compared across a run
 period. What each module publishes is chosen by its `digi` and `status` FHiCL
 tables, whose presets are in `Offline/CRVDQM/fcl/prolog.fcl`. Read
-`Offline/CRVDQM/README.md` before changing either module, and note that
+`Offline/CRVDQM/README.md` before changing it, and note that
 changing binning is a versioned operation described there.
 
 Job fcl: `ArtModules/fcl/RunCrvDQM.fcl` (online)
