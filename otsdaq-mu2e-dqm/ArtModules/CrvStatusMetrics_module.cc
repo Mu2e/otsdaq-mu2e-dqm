@@ -1,26 +1,37 @@
-// CRV ROC Status Header metrics module
-// Fills mu2e::CRVStatusDQM (histograms + firmware error bits) and publishes
-// the same LastPoint scalars as before via the artdaq MetricManager.
+// CRV metrics for graphite, via the artdaq MetricManager. No histograms: the
+// CRV DQM histograms are CrvDQM's. This module counts straight from the
+// unpacked products and sends:
 //
-// Per-event metrics (LastPoint):
-//   CRV.DTC<n>.ROC<m>.TriggerCount
-//   CRV.DTC<n>.ROC<m>.EventWindowTag
-//   CRV.DTC<n>.ROC<m>.ActiveFEBCount
-//   CRV.DTC<n>.ROC<m>.MicroBunchStatus
-//   CRV.DTC<n>.ROC<m>.WordCount
-//   CRV.DTC<n>.ROC<m>.LinkLatency       (65535 = no measurement from the DTC)
+// Error counts, summed over ROCs/links, one per error type (RunningSum: the
+// total since the process started, never reset, so a plot shows the slope and
+// a quiet detector reads flat). Where each is localised is in the DQM
+// histograms, not here.
+//   CRV.Errors.Hardware.<bit>   ROC-reported: MicroBunchStatus error bits
+//                               (FEBuBMismatch, FEBBufferIssue, FEBOverflow,
+//                               uBMatchError, Truncation; the Group*Issue bits
+//                               are left to the DQM), one ROC header = one count
+//   CRV.Errors.Link.<bit>       DTC link status bits (ROCTimeout, SeqNumErr,
+//                               CRCErr, FatalErr, Error), one status block = one
+//   CRV.Errors.Link.LatencyInvalid   0xFFFF latency words (no DTC measurement)
+//   CRV.Errors.DAQ.RocDtcEwtMismatch ROC headers whose event window tag differs
+//                               from the DTC data header's
+//   CRV.Errors.DAQ.<code>       CrvDAQerror codes from the unpacker
 //
-// Histograms have fixed binning (Offline/CRVDQM); which are shipped is
-// chosen by the `status` table, normally @local::CRVDQM.StatusOnline from
-// Offline/CRVDQM/fcl/prolog.fcl.
+// Occupancy (Average over the metric interval, so independent of the
+// dispatcher prescale): digis per event, in total and per global FEB ID of the
+// configured readout (0 for a FEB with no digi in an event).
+//   CRV.DigisPerEvent
+//   CRV.FEB<global FEB ID>.DigisPerEvent
 //
-// Prefers CrvStatus / CrvDAQerror products when present (after unpack).
-// Falls back to DTC-fragment decode for LastPoint if the product is missing.
+// Every series is sent every event, zeros included, so none goes stale. The
+// metrics block that routes them (graphite host, levels) is the art process's
+// ArtdaqGlobalsService configuration, not this module's.
+//
+// Defaults match the otsdaq online job (unpacker label "crvDigi", KPP
+// readout), so the analyzer needs no parameters there.
 
-#include <bitset>
-#include <chrono>
+#include <cstdint>
 #include <map>
-#include <memory>
 #include <string>
 #include <vector>
 
@@ -28,60 +39,55 @@
 #include "art/Framework/Core/ModuleMacros.h"
 #include "art/Framework/Principal/Event.h"
 #include "art/Framework/Principal/Handle.h"
-#include "art/Framework/Principal/SubRun.h"
-#include "art/Framework/Services/Registry/ServiceHandle.h"
-#include "art/Framework/Services/Registry/ServiceRegistry.h"
-#include "art_root_io/TFileService.h"
 
-#include "artdaq-core-mu2e/Overlays/DTCEventFragment.hh"
-#include "artdaq-core-mu2e/Overlays/Decoders/CRVDataDecoder.hh"
-#include "artdaq-core-mu2e/Overlays/FragmentType.hh"
-#include "artdaq-core/Data/ContainerFragment.hh"
-#include "artdaq-core/Data/Fragment.hh"
 #include "artdaq-utilities/Plugins/MetricManager.hh"
 #include "artdaq/DAQdata/Globals.hh"
 #include "cetlib_except/exception.h"
 
-#include "otsdaq-mu2e/ArtModules/HistoSender.hh"
-
+#include "Offline/CRVDQM/inc/CRVDQMRun1.hh"
 #include "Offline/CRVDQM/inc/CRVStatusDQM.hh"
-#include "Offline/DQMHelpers/inc/DQMHistSetConfig.hh"
 #include "Offline/RecoDataProducts/inc/CrvDAQerror.hh"
+#include "Offline/RecoDataProducts/inc/CrvDigi.hh"
 #include "Offline/RecoDataProducts/inc/CrvStatus.hh"
 
-#include "TH1.h"
+#include "TString.h"
 
 namespace
 {
-// Keys the module took before the status client fixed its binning. Rejected,
-// because a plain ParameterSet would otherwise ignore them silently.
-constexpr const char* kRemovedKeys[] = {"nBinsLatency",
-                                        "maxLinkLatency",
-                                        "nBinsTriggerCount",
-                                        "maxTriggerCount",
-                                        "nBinsWordCount",
-                                        "maxWordCount",
-                                        "nBinsEwtMismatch",
-                                        "maxEwtMismatch",
-                                        "fillLivePlots",
-                                        "segmentation"};
+// ROC-reported error bits sent as metrics: indices into CRVStatusDQM's eight
+// MicroBunchStatus error bits (24-31), without the three Group*Issue bits.
+constexpr int kNHardwareBits                = 5;
+constexpr int kHardwareBits[kNHardwareBits] = {0, 1, 2, 6, 7};
 
-mu2e::DQMHistSet::Config statusHists(fhicl::ParameterSet const& ps)
+// DTC link status bits, as CRVStatusDQM histograms them.
+constexpr int         kNLinkStatusBits                      = 5;
+constexpr uint8_t     kLinkStatusBits[kNLinkStatusBits]     = {0, 2, 3, 6, 7};
+constexpr const char* kLinkStatusBitNames[kNLinkStatusBits] = {
+    "ROCTimeout", "SeqNumErr", "CRCErr", "FatalErr", "Error"};
+
+// The CRVDQMRun1 configuration named by `configuration` (its layout name,
+// default extracted = KPP); it sets which global FEB IDs get a series.
+int configurationFromFhicl(fhicl::ParameterSet const& ps)
 {
-	for(const char* key : kRemovedKeys)
-	{
-		if(ps.has_key(key))
-		{
-			throw cet::exception("CrvStatusMetrics")
-			    << "parameter \"" << key << "\" no longer exists: binning is fixed in "
-			    << "Offline/CRVDQM, and copies/publishing are chosen by the `status` "
-			    << "table (Offline/CRVDQM/fcl/prolog.fcl).\n";
-		}
-	}
-	return mu2e::toConfig(
-	    fhicl::Table<mu2e::DQMClientFhicl>(ps.get<fhicl::ParameterSet>("status", {}))()
-	        .hists());
+	const std::string name = ps.get<std::string>("configuration", "extracted");
+	for(int c = 0; c < mu2e::CRVDQMRun1::kNConfigurations; ++c)
+		if(name == mu2e::CRVDQMRun1::configurationName(c))
+			return c;
+	throw cet::exception("CrvStatusMetrics")
+	    << "configuration \"" << name << "\" is not a CRVDQMRun1 configuration "
+	    << "(run1a, extracted).\n";
 }
+
+// Keys of the module's earlier, histogramming version. Rejected rather than
+// silently ignored.
+constexpr const char* kRemovedKeys[] = {"status",
+                                        "sendHists",
+                                        "address",
+                                        "port",
+                                        "sendIntervalSec",
+                                        "outputTag",
+                                        "segmentation",
+                                        "fillLivePlots"};
 }  // namespace
 
 namespace ots
@@ -96,392 +102,203 @@ class CrvStatusMetrics : public art::EDAnalyzer
   private:
 	void beginJob() override;
 	void analyze(art::Event const& e) override;
-	void beginSubRun(art::SubRun const& sr) override;
-	void endSubRun(art::SubRun const& sr) override;
 	void endJob() override;
 
-	void Send();
-	void sendLastPointFromHelper();
-	void fillLastPointFromFragments(art::Event const& e);
+	void sendErrorMetrics(const mu2e::CrvStatusCollection&   crvStatus,
+	                      const mu2e::CrvDAQerrorCollection* crvDaqErrors) const;
+	void sendDigiMetrics(const mu2e::CrvDigiCollection& crvDigis) const;
 
 	template<typename T>
 	void sendMetric(const std::string& name,
 	                T                  value,
 	                const std::string& units,
-	                int                level,
 	                artdaq::MetricMode mode) const;
 
+	int           configuration_;
 	art::InputTag crvStatusTag_;
 	art::InputTag crvDaqErrorTag_;
+	art::InputTag crvDigiTag_;
+	bool          sendErrorMetrics_;
+	bool          sendDigiMetrics_;
 	int           diagLevel_;
 	int           metricLevel_;
-	std::string   outputTag_;
-	bool          sendHists_;
-	int           port_;
-	std::string   address_;
-	float         sendIntervalSec_;
-
-	std::unique_ptr<HistoSender>                       histoSender_;
-	std::chrono::time_point<std::chrono::steady_clock> lastSendTime_;
-
-	mu2e::CRVStatusDQM dqm_;
 
 	size_t      eventCount_{0};
+	size_t      noStatusCount_{0};
+	size_t      noDigiCount_{0};
 	std::string outputPrefix_;
 };
 
 CrvStatusMetrics::CrvStatusMetrics(fhicl::ParameterSet const& ps)
     : art::EDAnalyzer(ps)
-    , crvStatusTag_(ps.get<std::string>("crvStatusTag", "crvdigi"))
-    , crvDaqErrorTag_(ps.get<std::string>("crvDaqErrorTag", "crvdigi"))
+    , configuration_(configurationFromFhicl(ps))
+    , crvStatusTag_(ps.get<std::string>("crvStatusTag", "crvDigi"))
+    , crvDaqErrorTag_(ps.get<std::string>("crvDaqErrorTag", "crvDigi"))
+    , crvDigiTag_(ps.get<std::string>("crvDigiTag", "crvDigi"))
+    , sendErrorMetrics_(ps.get<bool>("sendErrorMetrics", true))
+    , sendDigiMetrics_(ps.get<bool>("sendDigiMetrics", true))
     , diagLevel_(ps.get<int>("diagLevel", 1))
     , metricLevel_(ps.get<int>("metricLevel", 3))
-    , outputTag_(ps.get<std::string>("outputTag", "CRVStatusDQM"))
-    , sendHists_(ps.get<bool>("sendHists", true))
-    , port_(ps.get<int>("port", 6000))
-    , address_(ps.get<std::string>("address", "localhost"))
-    , sendIntervalSec_(ps.get<float>("sendIntervalSec", 0.5f))
-    , dqm_(statusHists(ps))
 {
 	outputPrefix_ = "[CrvStatusMetrics] ";
+	for(const char* key : kRemovedKeys)
+	{
+		if(ps.has_key(key))
+		{
+			throw cet::exception("CrvStatusMetrics")
+			    << "parameter \"" << key << "\" no longer exists: CrvStatusMetrics sends "
+			    << "metrics only; the status histograms are CrvDQM's.\n";
+		}
+	}
 }
 
 void CrvStatusMetrics::beginJob()
 {
 	if(diagLevel_ > 0)
 	{
-		std::cout << outputPrefix_ << "beginJob: diagLevel=" << diagLevel_
-		          << " metricLevel=" << metricLevel_ << " sendHists=" << sendHists_
+		std::cout << outputPrefix_ << "beginJob: configuration="
+		          << mu2e::CRVDQMRun1::configurationName(configuration_) << " ("
+		          << mu2e::CRVDQMRun1::nFebs(configuration_) << " FEB series)"
+		          << " metricLevel=" << metricLevel_ << " errors=" << sendErrorMetrics_
+		          << " digis=" << sendDigiMetrics_
+		          << " metricManager=" << (metricMan ? "yes" : "NO (nothing is sent)")
 		          << std::endl;
 	}
-
-	if(sendHists_)
-	{
-		try
-		{
-			histoSender_ = std::make_unique<HistoSender>(address_, port_);
-			std::cout << outputPrefix_ << "Successfully connected HistoSender to "
-			          << address_ << ":" << port_ << std::endl;
-		}
-		catch(const std::exception& e)
-		{
-			std::cout << outputPrefix_ << "Failed to initialise HistoSender: " << e.what()
-			          << std::endl;
-			sendHists_ = false;
-		}
-	}
-
-	if(art::ServiceRegistry::isAvailable<art::TFileService>())
-	{
-		art::ServiceHandle<art::TFileService> tfs;
-		dqm_.Book(tfs->mkdir(outputTag_));
-	}
-	else if(diagLevel_ > 0)
-	{
-		std::cout << outputPrefix_
-		          << "No TFileService; histograms disabled, LastPoint still sent"
-		          << std::endl;
-	}
-
-	lastSendTime_ = std::chrono::steady_clock::now();
 }
 
 template<typename T>
 void CrvStatusMetrics::sendMetric(const std::string& name,
                                   T                  value,
                                   const std::string& units,
-                                  int                level,
                                   artdaq::MetricMode mode) const
 {
 	if(metricMan != nullptr)
 	{
-		metricMan->sendMetric(name, value, units, level, mode);
+		metricMan->sendMetric(name, value, units, metricLevel_, mode);
 	}
 }
 
-void CrvStatusMetrics::sendLastPointFromHelper()
+void CrvStatusMetrics::sendErrorMetrics(const mu2e::CrvStatusCollection&   crvStatus,
+                                        const mu2e::CrvDAQerrorCollection* crvDaqErrors) const
 {
-	for(const auto& snap : dqm_.lastEventRocs())
+	using mu2e::CRVStatusDQM;
+	uint64_t firmware[CRVStatusDQM::kNErrorBits] = {};
+	uint64_t link[kNLinkStatusBits]              = {};
+	uint64_t latencyInvalid = 0, ewtMismatch = 0;
+
+	for(const auto& status : crvStatus)
 	{
-		const std::string rocPrefix =
-		    "CRV.DTC" + std::to_string(static_cast<int>(snap.dtcId)) + ".ROC" +
-		    std::to_string(static_cast<int>(snap.linkId)) + ".";
+		const uint8_t linkStatus = status.GetLinkStatus();
+		for(int i = 0; i < kNLinkStatusBits; ++i)
+			if((linkStatus >> kLinkStatusBits[i]) & 1u)
+				++link[i];
+		if(status.GetLinkLatency() == CRVStatusDQM::kLatencySentinel)
+			++latencyInvalid;
 
-		if(diagLevel_ > 0)
-		{
-			std::cout << outputPrefix_ << "  " << rocPrefix
-			          << "TriggerCount=" << snap.triggerCount << " EWT=" << snap.ewt
-			          << " ActiveFEBs=" << snap.activeFebCount << " MicroBunchStatus=0x"
-			          << std::hex << snap.microBunchStatus << std::dec
-			          << " WordCount=" << snap.wordCount << std::endl;
-		}
-
-		sendMetric(rocPrefix + "TriggerCount",
-		           static_cast<uint64_t>(snap.triggerCount),
-		           "counts",
-		           metricLevel_,
-		           artdaq::MetricMode::LastPoint);
-		sendMetric(rocPrefix + "EventWindowTag",
-		           static_cast<uint64_t>(snap.ewt),
-		           "EWT",
-		           metricLevel_,
-		           artdaq::MetricMode::LastPoint);
-		sendMetric(rocPrefix + "ActiveFEBCount",
-		           static_cast<uint64_t>(snap.activeFebCount),
-		           "FEBs",
-		           metricLevel_,
-		           artdaq::MetricMode::LastPoint);
-		sendMetric(rocPrefix + "MicroBunchStatus",
-		           static_cast<uint64_t>(snap.microBunchStatus),
-		           "status",
-		           metricLevel_,
-		           artdaq::MetricMode::LastPoint);
-		sendMetric(rocPrefix + "WordCount",
-		           static_cast<uint64_t>(snap.wordCount),
-		           "words",
-		           metricLevel_,
-		           artdaq::MetricMode::LastPoint);
-		sendMetric(rocPrefix + "LinkLatency",
-		           static_cast<uint64_t>(snap.linkLatency),
-		           "ticks",
-		           metricLevel_,
-		           artdaq::MetricMode::LastPoint);
-	}
-}
-
-void CrvStatusMetrics::fillLastPointFromFragments(art::Event const& e)
-{
-	std::vector<art::Handle<artdaq::Fragments>> fragmentHandles =
-	    e.getMany<std::vector<artdaq::Fragment>>();
-
-	artdaq::FragmentPtrs containerFragments;
-	artdaq::Fragments    fragments;
-
-	for(const auto& handle : fragmentHandles)
-	{
-		if(!handle.isValid() || handle->empty())
+		if(!status.HasROCHeader())
 			continue;
-
-		if(handle->front().type() == artdaq::Fragment::ContainerFragmentType)
-		{
-			for(const auto& cont : *handle)
-			{
-				artdaq::ContainerFragment contf(cont);
-				if(contf.fragment_type() != mu2e::FragmentType::DTCEVT)
-					continue;
-				for(size_t i = 0; i < contf.block_count(); ++i)
-				{
-					containerFragments.push_back(contf[i]);
-					fragments.push_back(*containerFragments.back());
-				}
-			}
-		}
-		else if(handle->front().type() == mu2e::FragmentType::DTCEVT)
-		{
-			for(const auto& frag : *handle)
-				fragments.emplace_back(frag);
-		}
+		const auto&    roc      = status.GetROCHeader().front();
+		const uint32_t ubStatus = roc.GetMicroBunchStatus();
+		for(int b = 0; b < CRVStatusDQM::kNErrorBits; ++b)
+			if((ubStatus >> (CRVStatusDQM::kErrorBitOffset + b)) & 1u)
+				++firmware[b];
+		if(roc.GetEventWindowTag() != status.GetEventWindowTag())
+			++ewtMismatch;
 	}
 
-	if(diagLevel_ > 1)
+	const auto sum = artdaq::MetricMode::RunningSum;
+	for(int b : kHardwareBits)
+		sendMetric(std::string("CRV.Errors.Hardware.") + CRVStatusDQM::errorBitLabel(b),
+		           firmware[b], "counts", sum);
+	for(int i = 0; i < kNLinkStatusBits; ++i)
+		sendMetric(std::string("CRV.Errors.Link.") + kLinkStatusBitNames[i], link[i], "counts",
+		           sum);
+	sendMetric("CRV.Errors.Link.LatencyInvalid", latencyInvalid, "counts", sum);
+	sendMetric("CRV.Errors.DAQ.RocDtcEwtMismatch", ewtMismatch, "counts", sum);
+
+	// Every known code is sent, zero included, so the set of series is fixed.
+	std::map<int, uint64_t> daq;
+	for(const auto& [code, name] : mu2e::CrvDAQerrorCodeDetail::names())
+		daq[static_cast<int>(code)] = 0;
+	if(crvDaqErrors != nullptr)
+		for(const auto& err : *crvDaqErrors)
+			++daq[static_cast<int>(err.GetErrorCode())];
+	for(const auto& [code, name] : mu2e::CrvDAQerrorCodeDetail::names())
+		sendMetric("CRV.Errors.DAQ." + name, daq[static_cast<int>(code)], "counts", sum);
+}
+
+void CrvStatusMetrics::sendDigiMetrics(const mu2e::CrvDigiCollection& crvDigis) const
+{
+	using namespace mu2e::CRVDQMRun1;
+	const int             nFeb = nFebs(configuration_);
+	std::vector<uint64_t> perFeb(nFeb, 0);
+	for(const auto& digi : crvDigis)
 	{
-		std::cout << outputPrefix_ << e.id() << " - " << fragments.size()
-		          << " DTC fragments (LastPoint fallback)" << std::endl;
+		const int roc = digi.GetROC(), feb = digi.GetFEB();
+		if(!onlineIdInRange(roc, feb, digi.GetFEBchannel()))
+			continue;
+		const int globalFeb = globalFebId(roc, feb);
+		if(febInConfiguration(configuration_, globalFeb))
+			++perFeb[globalFeb];
 	}
-
-	for(const auto& frag : fragments)
-	{
-		try
-		{
-			mu2e::DTCEventFragment dtcFrag(frag);
-			DTCLib::DTC_Event      dtcEvent = dtcFrag.getData();
-
-			for(unsigned int iSub = 0; iSub < dtcEvent.GetSubEventCount(); ++iSub)
-			{
-				DTCLib::DTC_SubEvent& subevent = *(dtcEvent.GetSubEvent(iSub));
-				mu2e::CRVDataDecoder  decoder(subevent);
-
-				for(size_t iBlock = 0; iBlock < subevent.GetDataBlockCount(); ++iBlock)
-				{
-					auto blockHeader = subevent.GetDataBlock(iBlock)->GetHeader();
-					if(blockHeader->GetSubsystem() !=
-					   DTCLib::DTC_Subsystem::DTC_Subsystem_CRV)
-						continue;
-
-					const std::string rocPrefix =
-					    "CRV.DTC" +
-					    std::to_string(static_cast<int>(blockHeader->GetID())) + ".ROC" +
-					    std::to_string(static_cast<int>(blockHeader->GetLinkID())) + ".";
-
-					const mu2e::CRVDataDecoder::CRVROCStatusPacketFEBII* status =
-					    decoder.GetCRVROCStatusPacketFEBII(iBlock);
-
-					if(status == nullptr)
-						continue;
-
-					const uint32_t        ewt        = status->GetEventWindowTag();
-					const uint16_t        trigCount  = status->TriggerCount;
-					const uint16_t        wordCount  = status->ControllerEventWordCount;
-					const uint32_t        ubStatus   = status->GetMicroBunchStatus();
-					const std::bitset<24> activeFEBs = status->GetActiveFEBFlags();
-					const int nActiveFEBs = static_cast<int>(activeFEBs.count());
-
-					if(diagLevel_ > 0)
-					{
-						std::cout << outputPrefix_ << "  " << rocPrefix
-						          << "TriggerCount=" << trigCount << " EWT=" << ewt
-						          << " ActiveFEBs=" << activeFEBs.to_string() << " ("
-						          << nActiveFEBs << " active)"
-						          << " MicroBunchStatus=0x" << std::hex << ubStatus
-						          << std::dec << " WordCount=" << wordCount << std::endl;
-					}
-
-					sendMetric(rocPrefix + "TriggerCount",
-					           static_cast<uint64_t>(trigCount),
-					           "counts",
-					           metricLevel_,
-					           artdaq::MetricMode::LastPoint);
-					sendMetric(rocPrefix + "EventWindowTag",
-					           static_cast<uint64_t>(ewt),
-					           "EWT",
-					           metricLevel_,
-					           artdaq::MetricMode::LastPoint);
-					sendMetric(rocPrefix + "ActiveFEBCount",
-					           static_cast<uint64_t>(nActiveFEBs),
-					           "FEBs",
-					           metricLevel_,
-					           artdaq::MetricMode::LastPoint);
-					sendMetric(rocPrefix + "MicroBunchStatus",
-					           static_cast<uint64_t>(ubStatus),
-					           "status",
-					           metricLevel_,
-					           artdaq::MetricMode::LastPoint);
-					sendMetric(rocPrefix + "WordCount",
-					           static_cast<uint64_t>(wordCount),
-					           "words",
-					           metricLevel_,
-					           artdaq::MetricMode::LastPoint);
-				}
-			}
-		}
-		catch(const std::exception& ex)
-		{
-			if(diagLevel_ > 0)
-			{
-				std::cerr << outputPrefix_
-				          << "Exception processing fragment: " << ex.what() << std::endl;
-			}
-		}
-	}
+	const auto avg = artdaq::MetricMode::Average;
+	sendMetric("CRV.DigisPerEvent", static_cast<uint64_t>(crvDigis.size()), "digis", avg);
+	for(int f = 0; f < nFeb; ++f)
+		sendMetric(Form("CRV.FEB%02d.DigisPerEvent", f), perFeb[f], "digis", avg);
 }
 
 void CrvStatusMetrics::analyze(art::Event const& e)
 {
 	++eventCount_;
 
-	art::Handle<mu2e::CrvStatusCollection> statusHandle;
-	e.getByLabel(crvStatusTag_, statusHandle);
-	const bool haveProduct = statusHandle.isValid() && statusHandle.product() != nullptr;
-
-	// The helper keeps the per-ROC snapshots only when booked (TFileService present).
-	if(haveProduct && dqm_.booked())
+	if(sendErrorMetrics_)
 	{
-		art::Handle<mu2e::CrvDAQerrorCollection> daqHandle;
-		e.getByLabel(crvDaqErrorTag_, daqHandle);
-		if(daqHandle.isValid() && daqHandle.product() != nullptr)
+		art::Handle<mu2e::CrvStatusCollection> statusHandle;
+		e.getByLabel(crvStatusTag_, statusHandle);
+		if(statusHandle.isValid() && statusHandle.product() != nullptr)
 		{
-			dqm_.Fill(*statusHandle, *daqHandle);
+			art::Handle<mu2e::CrvDAQerrorCollection> daqHandle;
+			e.getByLabel(crvDaqErrorTag_, daqHandle);
+			const bool haveDaq = daqHandle.isValid() && daqHandle.product() != nullptr;
+			sendErrorMetrics(*statusHandle, haveDaq ? daqHandle.product() : nullptr);
 		}
 		else
 		{
-			dqm_.Fill(*statusHandle);
+			++noStatusCount_;
+			if(diagLevel_ > 1)
+				std::cout << outputPrefix_ << e.id() << " no CrvStatus at " << crvStatusTag_
+				          << "; no error metrics" << std::endl;
 		}
-		sendLastPointFromHelper();
 	}
-	else
+
+	if(sendDigiMetrics_)
 	{
-		if(diagLevel_ > 1)
+		art::Handle<mu2e::CrvDigiCollection> digiHandle;
+		e.getByLabel(crvDigiTag_, digiHandle);
+		if(digiHandle.isValid() && digiHandle.product() != nullptr)
 		{
-			std::cout << outputPrefix_ << e.id() << " no CrvStatus at " << crvStatusTag_
-			          << "; LastPoint from fragments" << std::endl;
+			sendDigiMetrics(*digiHandle);
 		}
-		fillLastPointFromFragments(e);
-	}
-
-	auto                          currentTime = std::chrono::steady_clock::now();
-	std::chrono::duration<double> elapsed     = currentTime - lastSendTime_;
-	if(elapsed.count() >= sendIntervalSec_)
-	{
-		Send();
-		lastSendTime_ = currentTime;
+		else
+		{
+			++noDigiCount_;
+			if(diagLevel_ > 1)
+				std::cout << outputPrefix_ << e.id() << " no CrvDigi at " << crvDigiTag_
+				          << "; no digi metrics" << std::endl;
+		}
 	}
 }
-
-void CrvStatusMetrics::Send()
-{
-	// The live segment copies are labelled with the range they hold; refresh
-	// that before shipping, so a title read on the GUI is never behind.
-	dqm_.hists().RefreshLabels();
-
-	if(!sendHists_ || histoSender_ == nullptr)
-		return;
-	if(!dqm_.booked())
-		return;
-
-	// Exactly what the `status` table's rules publish, under crv/<group or name>.
-	std::map<std::string, std::vector<TH1*>> hists;
-	for(const auto& [group, copies] : dqm_.hists().publishedCopies())
-	{
-		auto& out = hists["crv/" + group + ":replace"];
-		out.insert(out.end(), copies.begin(), copies.end());
-	}
-	histoSender_->sendHistograms(hists);
-
-	if(diagLevel_ > 1)
-	{
-		std::cout << outputPrefix_ << "Sent histograms to " << address_ << ":" << port_
-		          << std::endl;
-	}
-}
-
-void CrvStatusMetrics::beginSubRun(art::SubRun const& sr)
-{
-	dqm_.BeginSubRun(static_cast<int>(sr.run()), static_cast<int>(sr.subRun()));
-}
-
-void CrvStatusMetrics::endSubRun(art::SubRun const&) { dqm_.EndSubRun(); }
 
 void CrvStatusMetrics::endJob()
 {
-	dqm_.EndJob();
-	if(sendHists_ && histoSender_ != nullptr)
+	if(diagLevel_ > 0)
 	{
-		Send();
-		histoSender_.reset();
+		std::cout << outputPrefix_ << "endJob: events=" << eventCount_
+		          << " without CrvStatus=" << noStatusCount_
+		          << " without CrvDigi=" << noDigiCount_ << std::endl;
 	}
-
-	std::cout << outputPrefix_ << "========== End Job Summary ==========" << std::endl;
-	std::cout << outputPrefix_ << "Events processed: " << eventCount_ << std::endl;
-	std::cout << outputPrefix_ << "Helper events: " << dqm_.nEvents() << std::endl;
-	std::cout << outputPrefix_
-	          << "Events with ROC header: " << dqm_.nEventsWithRocHeader() << std::endl;
-	std::cout << outputPrefix_
-	          << "Events with firmware error bit: " << dqm_.nEventsWithAnyErrorBit()
-	          << std::endl;
-	std::cout << outputPrefix_ << "Distinct ROCs: " << dqm_.seenRocs().size()
-	          << std::endl;
-	if(TH1* invalid = dqm_.linkLatencyInvalid())
-	{
-		std::cout << outputPrefix_ << "Invalid (0xFFFF) link latencies: "
-		          << invalid->Integral(0, invalid->GetNbinsX() + 1) << std::endl;
-	}
-	for(int b = 0; b < mu2e::CRVStatusDQM::kNErrorBits; ++b)
-	{
-		std::cout << outputPrefix_ << "  " << mu2e::CRVStatusDQM::errorBitLabel(b) << ": "
-		          << dqm_.errorBitCount(b) << std::endl;
-	}
-	std::cout << outputPrefix_ << "=====================================" << std::endl;
 }
 
-DEFINE_ART_MODULE(ots::CrvStatusMetrics)
 }  // namespace ots
+
+DEFINE_ART_MODULE(ots::CrvStatusMetrics)

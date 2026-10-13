@@ -140,6 +140,18 @@ mu2e::DQMHistSet::Config clientHists(fhicl::ParameterSet const& ps, const char* 
 	        .hists());
 }
 
+// The CRVDQMRun1 configuration named by `configuration` (its layout name).
+int configurationFromFhicl(fhicl::ParameterSet const& ps)
+{
+	const std::string name = ps.get<std::string>("configuration", "extracted");
+	for(int c = 0; c < mu2e::CRVDQMRun1::kNConfigurations; ++c)
+		if(name == mu2e::CRVDQMRun1::configurationName(c))
+			return c;
+	throw cet::exception("CrvDQM")
+	    << "configuration \"" << name << "\" is not a CRVDQMRun1 configuration "
+	    << "(run1a, extracted).\n";
+}
+
 // Workaround for ROOT fatal "TPad::Range: y1 == y2 == 0" on empty histograms drawn
 // in the web canvas. Put a tiny entry into bin 1 so max_bin_content > 0; it is
 // overwritten as soon as real data arrives.
@@ -206,6 +218,11 @@ class CrvDQM : public art::EDAnalyzer
 	void updateWebDisplay(bool force = false);
 
 	// fcl parameters
+	// CRVDQMRun1 configuration the clients book for ("run1a" or "extracted",
+	// default extracted = KPP): it sizes the FEB-, channel- and link-indexed
+	// axes. Booking happens in beginJob, before any geometry is available, so
+	// it is a parameter; the geometry seen at run start must name the same one.
+	int           configuration_;
 	art::InputTag crvDigiTag_;    // producer module label
 	art::InputTag crvStatusTag_;  // CrvStatus producer module label
 	int           diagLevel_;
@@ -281,6 +298,7 @@ class CrvDQM : public art::EDAnalyzer
 // Constructor impl
 CrvDQM::CrvDQM(fhicl::ParameterSet const& ps)
     : art::EDAnalyzer(ps)
+    , configuration_(configurationFromFhicl(ps))
     , crvDigiTag_(ps.get<std::string>("crvDigiTag", "CrvDigi"))
     , crvStatusTag_(ps.get<std::string>("crvStatusTag", crvDigiTag_.label()))
     , diagLevel_(ps.get<int>("diagLevel", 3))
@@ -293,8 +311,8 @@ CrvDQM::CrvDQM(fhicl::ParameterSet const& ps)
     , showSameFpgaTimingInCanvas_(ps.get<bool>("showSameFpgaTimingInCanvas", true))
     , canvasPdfFile_(ps.get<std::string>("canvasPdfFile", "CrvDQM.pdf"))
     , sendIntervalSec_(ps.get<float>("sendIntervalSec", 0.5))
-    , dqm_((rejectRemovedKeys(ps), clientHists(ps, "digi")))
-    , statusDqm_(clientHists(ps, "status"))
+    , dqm_((rejectRemovedKeys(ps), clientHists(ps, "digi")), configuration_)
+    , statusDqm_(clientHists(ps, "status"), configuration_)
     , h1_dummy_(nullptr)
     , enableHttpServer_(ps.get<bool>("enableHttpServer", true))
     , httpPort_(ps.get<int>("httpPort", 8877))
@@ -414,7 +432,7 @@ void CrvDQM::beginJob()
 				g->SetDrawOption("AP");
 			}
 		}
-		const mu2e::DQMAxis link = mu2e::CRVStatusDQM::kLink;
+		const mu2e::DQMAxis link = statusDqm_.linkAxis();
 		h_invalidLatencyRate_    = std::make_unique<TH1F>(
             "linkLatencyInvalidRate",
             "Invalid link-latency words / status blocks;DTC#times6 + link ID;Fraction",
@@ -645,6 +663,13 @@ void CrvDQM::updateLayout(art::Event const& event)
 		          << "\" (configuration "
 		          << mu2e::CRVDQMRun1::configurationName(configuration) << ")"
 		          << std::endl;
+		if(configuration != configuration_)
+			std::cout << outputPrefix_ << "ERROR: the clients were booked for configuration \""
+			          << mu2e::CRVDQMRun1::configurationName(configuration_)
+			          << "\" (fcl `configuration`) but the geometry names \""
+			          << mu2e::CRVDQMRun1::configurationName(configuration)
+			          << "\"; per-sector occupancy and partner timing stay EMPTY"
+			          << std::endl;
 	}
 	catch(const std::exception& e)
 	{
@@ -692,7 +717,7 @@ void CrvDQM::zoomToActiveGlobalFebs()
 		return;
 	// One FEB of margin, so an edge FEB going quiet is still visible.
 	const int lo = std::max(*febIds.begin() - 1, 0);
-	const int hi = std::min(*febIds.rbegin() + 1, mu2e::CRVDQMRun1::kNFebs - 1);
+	const int hi = std::min(*febIds.rbegin() + 1, dqm_.nFebs() - 1);
 
 	for(const auto& spec : kGlobalFebAxes)
 	{
@@ -707,7 +732,7 @@ void CrvDQM::zoomToActiveGlobalFebs()
 	// range; a ROC with no hits is left full-range rather than shown empty-zoomed.
 	const int nFebPerRoc = mu2e::CRVDQMRun1::kNFebPerROC;
 	const int nChan      = mu2e::CRVDQMRun1::kNChanPerFEB;
-	for(int roc = 1; roc <= mu2e::CRVDQMRun1::kNROC; ++roc)
+	for(int roc = 1; roc <= dqm_.nROC(); ++roc)
 	{
 		const int first = (roc - 1) * nFebPerRoc;
 		auto      it    = febIds.lower_bound(first);
@@ -732,7 +757,7 @@ void CrvDQM::unzoomGlobalFebAxes()
 			a->SetRange(0, 0);
 		}
 	}
-	for(int roc = 1; roc <= mu2e::CRVDQMRun1::kNROC; ++roc)
+	for(int roc = 1; roc <= dqm_.nROC(); ++roc)
 		for(TH1* h : dqm_.hists().copies(Form("crvDigiRates_ROC%d", roc)))
 			h->GetXaxis()->SetRange(0, 0);
 }
@@ -1254,7 +1279,7 @@ void CrvDQM::endJob()
 		art::TFileDirectory canvasDir =
 		    tfs_->mkdir(outputTag_).mkdir("timing_feb_canvases");
 
-		for(int globalFeb = 0; globalFeb < mu2e::CRVDQMRun1::kNFebs; ++globalFeb)
+		for(int globalFeb = 0; globalFeb < dqm_.nFebs(); ++globalFeb)
 		{
 			const int firstCol = globalFeb * kNFpgaPairs + 1;
 			if(pairs->Integral(

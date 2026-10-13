@@ -30,6 +30,10 @@ physics : {
   analyzers : {
     crvdqm : {
       module_type      : CrvDQM
+      # CRVDQMRun1 configuration the histograms are booked for: sizes the
+      # FEB/channel/link axes. Must match the geometry; the default is
+      # extracted (KPP), set "run1a" for the full detector.
+      configuration    : "extracted"
       crvDigiTag       : "crvdigi"
       crvStatusTag     : "crvdigi"
       diagLevel        : 1
@@ -47,8 +51,8 @@ physics : {
       # Offline/CRVDQM/fcl/prolog.fcl; override below this block, e.g.
       #   physics.analyzers.crvdqm.digi.hists.rules : [ ... ]
       digi   : @local::CRVDQM.DigiOnline
-      # Per-link status pages (crv/status). The status summaries come from
-      # CrvStatusMetrics with CRVDQM.StatusOnline, so nothing is shipped twice.
+      # Per-link status pages (crv/status); use CRVDQM.StatusOnline for the
+      # summaries as well.
       status : @local::CRVDQM.StatusLinksOnline
     }
   }
