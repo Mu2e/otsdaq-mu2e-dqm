@@ -57,12 +57,12 @@
 #include "TFile.h"
 #include "TGraph.h"
 #include "TH1.h"
-#include "TList.h"
 #include "TH1F.h"
 #include "TH1I.h"
 #include "TH2.h"
 #include "TH2F.h"
 #include "TH2I.h"
+#include "TList.h"
 #include "TProfile.h"
 #include "TProfile2D.h"
 #include "TString.h"
@@ -195,7 +195,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 		// art input tag label for the CaloDigiCollection
 		fhicl::Atom<std::string> caloDigiModuleLabel{fhicl::Name("caloDigiModuleLabel"),
-		                                             "CaloDigisFromDTCEvents"};
+		                                             "CaloDigi"};
 
 		// Disk maps are always saved to the ROOT file.
 		// This flag controls disk-map streaming only.
@@ -3326,9 +3326,9 @@ void CaloDigiDQM::resetRunState()
 	nFillDisk0_ = nFillDisk1_ = nFillLaser_ = nFillMiss_ = 0;
 	nLaserAmpAccepted_ = nDetLaserRatioAccepted_ = 0;
 	nEvtDigisOverflow_ = nWaveformSizeOverflow_ = nAmpOverflow_ = 0;
-	nOutOfRangeSipmId_         = 0;
-	histConsecutiveSendErrors_ = 0;
-	histTotalSendErrors_       = 0;
+	nOutOfRangeSipmId_                                          = 0;
+	histConsecutiveSendErrors_                                  = 0;
+	histTotalSendErrors_                                        = 0;
 
 	nhitsBlockSum_       = 0.0;
 	eventNumberBlockSum_ = 0.0;

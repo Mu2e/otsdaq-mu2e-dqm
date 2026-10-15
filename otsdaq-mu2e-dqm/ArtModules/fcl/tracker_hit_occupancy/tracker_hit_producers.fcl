@@ -1,0 +1,48 @@
+# Tracker fragment unpacking and hit reconstruction for occupancy DQM.
+# See tracker_hit_services.fcl for source provenance.
+physics.producers: {
+ProcessCFOData: {
+            cfoTag: "daq:CFO"
+            createEWM: true
+            diagLevel: 0
+            module_type: "EventHeaderFromCFOFragment"
+         }
+
+TrigMakeSD: {
+            addressing: "byMnid"
+            onMissingRow: "skip"
+            debugBits: [
+               "bit0:0",
+               "bit1:0"
+            ]
+            debugMode: 0
+            diagLevel: 0
+            missingDTCHeaders: false
+            module_type: "StrawDigisFromArtdaqFragments"
+            saveWaveforms: true
+         }
+
+TrigComMakeSH: {
+            CaloClusterCollectionTag: "notUsed"
+            EventWindowMarker: "ProcessCFOData"
+            FilterHits: false
+            FitType: 1
+            FlagCrossTalk: false
+            MaximumEnergy: 5e-3
+            MaximumRadius: 750
+            MaximumTime: 200000
+            MinimumEnergy: 5e-4
+            MinimumRadius: 350
+            MinimumTime: 0
+            ProtonBunchTimeTag: "ProcessCFOData"
+            StrawDigiADCWaveformCollectionTag: "TrigMakeSD"
+            StrawDigiCollectionTag: "TrigMakeSD"
+            UseCalorimeter: false
+            WriteStrawHitCollection: true
+            clusterDt: 100
+            crossTalkEnergy: 7e-3
+            crossTalkMaximumTime: 100
+            crossTalkMinimumTime: -1
+            module_type: "StrawHitReco"
+         }
+}

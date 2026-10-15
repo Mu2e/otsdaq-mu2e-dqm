@@ -497,7 +497,7 @@ mu2e -c test_CaloDQM.fcl
 
 | Parameter | Type | Default | Meaning |
 | --------- | ---- | ------- | ------- |
-| `caloDigiModuleLabel` | string | `"CaloDigisFromDTCEvents"` | Input tag label for the `CaloDigiCollection` |
+| `caloDigiModuleLabel` | string | `"CaloDigi"` | Input tag label for the `CaloDigiCollection` |
 | `sendHists` | bool | `false` | Enables streaming through `ots::HistoSender` |
 | `address` | string | `"mu2e-dl-01-data.fnal.gov"` | otsdaq receiver address |
 | `port` | int | `6000` | otsdaq receiver port |

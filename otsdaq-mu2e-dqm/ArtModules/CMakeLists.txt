@@ -17,7 +17,6 @@ cet_build_plugin(CaloDigiDQM art::module LIBRARIES REG
   Offline::DAQ
   Offline::CaloConditions
   Offline::CaloVisualizer
-  Offline::CaloVisualizer_dict
   Offline::Mu2eInterfaces
   ROOT::Hist
   ROOT::Tree
@@ -178,6 +177,47 @@ ROOT::RIO
 ROOT::Gui
 )
 
+# Add beside TrackerDQM in otsdaq-mu2e-dqm/ArtModules/CMakeLists.txt.
+cet_build_plugin(TrackerHitOccupancy art::module LIBRARIES REG
+  art_root_io::TFileService_service
+  otsdaq-mu2e::ArtModules
+  otsdaq::NetworkUtilities
+  Offline::DataProducts
+  Offline::RecoDataProducts
+  ROOT::Hist
+  ROOT::Core
+  ROOT::RIO
+)
+
+cet_build_plugin(CrvDQM art::module LIBRARIES REG
+art_root_io::TFileService_service
+artdaq-core-mu2e::Data
+otsdaq-mu2e::ArtModules
+otsdaq::NetworkUtilities
+Offline::CRVDQM
+Offline::DQMHelpers
+Offline::CRVConditions
+Offline::CosmicRayShieldGeom
+Offline::GeometryService
+Offline::ProditionsService
+Offline::RecoDataProducts
+ROOT::Hist
+ROOT::Tree
+ROOT::Core
+ROOT::RIO
+ROOT::Gui
+ROOT::RHTTP
+)
+
+cet_build_plugin(CrvStatusMetrics art::module LIBRARIES REG
+artdaq::DAQdata
+artdaq-utilities::Plugins
+Offline::CRVDQM
+Offline::RecoDataProducts
+ROOT::Core
+)
+
 install_headers()
 install_source()
 install_fhicl(SUBDIRS fcl)
+install_fhicl(SUBDIRS fcl/tracker_hit_occupancy SUBDIRNAME otsdaq-mu2e-dqm/tracker_hit_occupancy)

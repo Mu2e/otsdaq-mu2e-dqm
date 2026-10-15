@@ -47,7 +47,8 @@ class CaloIERCDQMHistoContainer
 	/// The objects stay booked and are simply refilled.
 	void Reset(void)
 	{
-		for(auto* hists : {&map_h1_dt_singlechan, &map_h1_dt_sameboard, &map_h1_dt_diffboard})
+		for(auto* hists :
+		    {&map_h1_dt_singlechan, &map_h1_dt_sameboard, &map_h1_dt_diffboard})
 			for(auto& pair : *hists)
 				if(pair.second._Hist)
 					pair.second._Hist->Reset();

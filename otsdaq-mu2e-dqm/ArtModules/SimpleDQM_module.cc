@@ -106,7 +106,7 @@ void ots::SimpleDQM::analyze(art::Event const& event)
 {
 	// fill the histograms of interest
 	++evtCounter_;
-	hist_->Fill(1);
+	hist_->Fill(hist_->GetBinCenter(1));
 	TLOG(TLVL_DEBUG + 20) << "[SimpleDQM::" << __func__ << "] Analyzing event "
 	                      << evtCounter_ << std::endl;
 

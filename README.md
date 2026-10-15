@@ -4,21 +4,21 @@ This package is a part of the Mu2e TDAQ Suite
 
 ## Common DAQ Repositories
 
-* [artdaq-core-mu2e](https://mu2e.github.io/daq-operations/doxygen/artdaq-core-mu2e): _artdaq_ Fragment data formats
-* [mu2e-pcie-utils](https://mu2e.github.io/daq-operations/doxygen/mu2e-pcie-utils): PCIe Device Driver and interface library
-* [artdaq-mu2e](https://mu2e.github.io/daq-operations/doxygen/artdaq-mu2e): Core data acquisition code
-* [otsdaq-mu2e](https://mu2e.github.io/daq-operations/doxygen/otsdaq-mu2e): Slow controls and Front-End Interface
-* [otsdaq-mu2e-dqm](https://mu2e.github.io/daq-operations/doxygen/otsdaq-mu2e-dqm): DQM interface and tools
-* [mu2e-trig-config](https://mu2e.github.io/daq-operations/doxygen/mu2e-trig-config): Trigger path FHiCL generation utilities
+* [artdaq-core-mu2e](https://mu2e.github.io/otsdaq-mu2e/doxygen/artdaq-core-mu2e): _artdaq_ Fragment data formats
+* [mu2e-pcie-utils](https://mu2e.github.io/otsdaq-mu2e/doxygen/mu2e-pcie-utils): PCIe Device Driver and interface library
+* [artdaq-mu2e](https://mu2e.github.io/otsdaq-mu2e/doxygen/artdaq-mu2e): Core data acquisition code
+* [otsdaq-mu2e](https://mu2e.github.io/otsdaq-mu2e/doxygen/otsdaq-mu2e): Slow controls and Front-End Interface
+* [otsdaq-mu2e-dqm](https://mu2e.github.io/otsdaq-mu2e/doxygen/otsdaq-mu2e-dqm): DQM interface and tools
+* [mu2e-trig-config](https://mu2e.github.io/otsdaq-mu2e/doxygen/mu2e-trig-config): Trigger path FHiCL generation utilities
 
 ## Subsystem-Specific Repositories
 
-* [otsdaq-mu2e-calorimeter](https://mu2e.github.io/daq-operations/doxygen/otsdaq-mu2e-calorimeter)
-* [otsdaq-mu2e-crv](https://mu2e.github.io/daq-operations/doxygen/otsdaq-mu2e-crv)
-* [otsdaq-mu2e-extmon](https://mu2e.github.io/daq-operations/doxygen/otsdaq-mu2e-extmon)
-* [otsdaq-mu2e-stm](https://mu2e.github.io/daq-operations/doxygen/otsdaq-mu2e-stm)
-* [otsdaq-mu2e-tracker](https://mu2e.github.io/daq-operations/doxygen/otsdaq-mu2e-tracker)
-* [otsdaq-mu2e-trigger](https://mu2e.github.io/daq-operations/doxygen/otsdaq-mu2e-trigger)
+* [otsdaq-mu2e-calorimeter](https://mu2e.github.io/otsdaq-mu2e/doxygen/otsdaq-mu2e-calorimeter)
+* [otsdaq-mu2e-crv](https://mu2e.github.io/otsdaq-mu2e/doxygen/otsdaq-mu2e-crv)
+* [otsdaq-mu2e-extmon](https://mu2e.github.io/otsdaq-mu2e/doxygen/otsdaq-mu2e-extmon)
+* [otsdaq-mu2e-stm](https://mu2e.github.io/otsdaq-mu2e/doxygen/otsdaq-mu2e-stm)
+* [otsdaq-mu2e-tracker](https://mu2e.github.io/otsdaq-mu2e/doxygen/otsdaq-mu2e-tracker)
+* [otsdaq-mu2e-trigger](https://mu2e.github.io/otsdaq-mu2e/doxygen/otsdaq-mu2e-trigger)
 
 # Additional Documentation (Package-Specific)
 
@@ -83,3 +83,28 @@ $ mz
 - The Histograms have there own class - ProtoTypeHist - in there you have to book and initiate all the RootObjects.
 - The Consumer for this example is in DataProcessorPlugins -  see dqmMu2eHistoConsumer_processor.cc to see how the consumer reads the root object using only the name. You must have a class member of the same type as you filled in you module. There is o need to rename or rebook (that's why we have the class). 
 - To add in Mu2e DataProducts you need to make sure you add in the Mu2e libraries- see ArtModule/CMakeList for examples.
+
+## CRV DQM
+
+`CrvDQM` (digis and per-link status, THttpServer page plus HistoSender) and
+`CrvStatusMetrics` (graphite metrics via the artdaq MetricManager: error
+counts per type as running sums, digis per event per global FEB as averages;
+no histograms) live here. otsdaq-mu2e-crv keeps
+the CRV front-end interfaces, table plugins and viewer, plus
+`fcl/CrvDQM_online.fcl`, the prolog aliases (`crvDqmOnlineDigi`,
+`crvDqmOnlineStatus`) that the OTS configuration database references for the
+`digi` and `status` tables. The old copies of both modules are in
+otsdaq-mu2e-crv's `ArtModules/attic/`.
+
+`CrvDQM` books and fills no histogram itself. The histogram sets, their fixed
+binning and the fills all live in `Offline/CRVDQM`, built on the generic
+`Offline/DQMHelpers` core, so the same client classes run here and in the
+offline art jobs in [Mu2e/DQM](https://github.com/Mu2e/DQM);
+the binning is fixed so that the two can be merged and compared across a run
+period. What each module publishes is chosen by its `digi` and `status` FHiCL
+tables, whose presets are in `Offline/CRVDQM/fcl/prolog.fcl`. Read
+`Offline/CRVDQM/README.md` before changing it, and note that
+changing binning is a versioned operation described there.
+
+Job fcl: `ArtModules/fcl/RunCrvDQM.fcl` (online)
+

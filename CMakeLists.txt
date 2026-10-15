@@ -10,7 +10,7 @@ cmake_minimum_required (VERSION 3.19 FATAL_ERROR)
 
 find_package(cetmodules 3.16.00 REQUIRED)
 
-project(otsdaq-mu2e-dqm VERSION 7.04.00)
+project(otsdaq-mu2e-dqm VERSION 7.05.00)
 
 include(CetCMakeEnv)
 cet_cmake_env()
@@ -70,6 +70,11 @@ endif()
 # these are minimum required versions, not the actual product versions
 find_package(otsdaq-mu2e 1.02.00 REQUIRED)
 find_package(Offline 11 REQUIRED)
+
+# CrvDQM and CrvStatusMetrics need Offline built with the CRVDQM package.
+if(NOT TARGET Offline::CRVDQM)
+  message(FATAL_ERROR "Offline::CRVDQM not found: build against an Offline that contains CRVDQM.")
+endif()
 
 #find_package(art_root_io 1.10.01 REQUIRED)
 

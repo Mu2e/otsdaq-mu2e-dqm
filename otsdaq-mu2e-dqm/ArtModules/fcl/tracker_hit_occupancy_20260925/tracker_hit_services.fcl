@@ -1,0 +1,2 @@
+# Compatibility include for saved OTS configurations. Maintain the stable file below.
+#include "otsdaq-mu2e-dqm/tracker_hit_occupancy/tracker_hit_services.fcl"

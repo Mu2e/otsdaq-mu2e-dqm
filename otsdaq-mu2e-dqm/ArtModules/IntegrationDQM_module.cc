@@ -604,7 +604,7 @@ void ots::IntegrationDQM::summary_stm_fill(art::Event const& event,
 	hists.digi_count._Hist->Fill(digis->size());
 	for(auto& digi : *digis)
 	{
-		hists.digi_ids._Hist->Fill(digi.DetID());
+		//hists.digi_ids._Hist->Fill(digi.DetID());
 		hists.digi_t0._Hist->Fill(digi.trigTimeOffset() * stm_tick_time_);
 	}
 
