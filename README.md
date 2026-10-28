@@ -84,6 +84,30 @@ $ mz
 - The Consumer for this example is in DataProcessorPlugins -  see dqmMu2eHistoConsumer_processor.cc to see how the consumer reads the root object using only the name. You must have a class member of the same type as you filled in you module. There is o need to rename or rebook (that's why we have the class). 
 - To add in Mu2e DataProducts you need to make sure you add in the Mu2e libraries- see ArtModule/CMakeList for examples.
 
+## Online modules on DQMHelpers clients
+
+A subsystem whose histograms are a client of `Offline/DQMHelpers` (CRV today;
+see `Offline/DQMHelpers/README.md`, "Adding a subdetector") needs only a thin
+art module here: the client books and fills, and
+`ArtModules/detail/DQMPublisher.hh` ships what the client's FHiCL rules
+publish, each group as `<prefix>/<group>:replace` through HistoSender, at most
+once per `sendIntervalSec`. The module reads its input, forwards the run and
+subrun boundaries, and draws its own display if it has one:
+
+```cpp
+ots::DQMPublisher publisher_{ps, "trk"};  // address, port, sendHists, sendIntervalSec
+mu2e::TrackerDigiDQM dqm_{clientHists(ps, "digi")};
+
+beginJob:    dqm_.Book(tfs_->mkdir("TrackerDigiDQM")); publisher_.add(dqm_); publisher_.connect();
+beginRun:    dqm_.ResetForNewRun();
+beginSubRun: dqm_.BeginSubRun(run, subrun);   endSubRun: dqm_.EndSubRun();
+analyze:     dqm_.Fill(digis); if(publisher_.due()) publisher_.send();
+endJob:      dqm_.EndJob(); publisher_.send(); publisher_.logPublished(); publisher_.disconnect();
+```
+
+`CrvDQM` is the full-size example (two clients, THttpServer page, display-only
+extra histograms passed to `send()`).
+
 ## CRV DQM
 
 `CrvDQM` (digis and per-link status, THttpServer page plus HistoSender) and
