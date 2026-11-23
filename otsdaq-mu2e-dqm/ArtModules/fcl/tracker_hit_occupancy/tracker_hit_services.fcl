@@ -66,6 +66,11 @@ ProditionsService: {
             useDb: true
             verbose: 0
          }
+         alignedCalorimeter: {
+            filenameDisk: "Offline/CaloConditions/data/disk_align.txt"
+            useDb: false
+            verbose: 0
+         }
          calCalib: {
             ADC2MeVCsI: 6.25e-2
             ADC2MeVlyso: 3.75e-3

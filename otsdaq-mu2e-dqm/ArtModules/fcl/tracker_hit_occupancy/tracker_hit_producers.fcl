@@ -9,26 +9,24 @@ ProcessCFOData: {
          }
 
 TrigMakeSD: {
-            allowOfflineFallbackWhenPanelMapMissing: false
+            addressing: "byMnid"
+            onMissingRow: "skip"
             debugBits: [
                "bit0:0",
                "bit1:0"
             ]
             debugMode: 0
             diagLevel: 0
-            forceOfflineAddressing: false
-            # MN IDs identify panels despite source_dtc_id=0 in current raw data.
-            keyOnMnid: true
             missingDTCHeaders: false
             module_type: "StrawDigisFromArtdaqFragments"
-            saveWaveforms: false
+            saveWaveforms: true
          }
 
 TrigComMakeSH: {
             CaloClusterCollectionTag: "notUsed"
             EventWindowMarker: "ProcessCFOData"
             FilterHits: false
-            FitType: 5
+            FitType: 1
             FlagCrossTalk: false
             MaximumEnergy: 5e-3
             MaximumRadius: 750
@@ -37,7 +35,7 @@ TrigComMakeSH: {
             MinimumRadius: 350
             MinimumTime: 0
             ProtonBunchTimeTag: "ProcessCFOData"
-            StrawDigiADCWaveformCollectionTag: "notUsed"
+            StrawDigiADCWaveformCollectionTag: "TrigMakeSD"
             StrawDigiCollectionTag: "TrigMakeSD"
             UseCalorimeter: false
             WriteStrawHitCollection: true

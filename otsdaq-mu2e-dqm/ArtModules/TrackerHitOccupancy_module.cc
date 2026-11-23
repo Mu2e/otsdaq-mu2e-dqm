@@ -1,5 +1,6 @@
-// Per-straw hit counts from reconstructed hits. No event or hit selection.
+// Per-straw hit counts with an optional histogram-only energy threshold.
 #include <array>
+#include <cmath>
 #include <cstdint>
 #include <map>
 #include <memory>
@@ -33,8 +34,10 @@ class TrackerHitOccupancy : public art::EDAnalyzer
 		fhicl::Atom<std::string>   address{fhicl::Name("address"), ""};
 		fhicl::Atom<int>           port{fhicl::Name("port"), 0};
 		fhicl::Atom<unsigned>      publishEvery{fhicl::Name("publishEvery"), 100};
-		fhicl::Atom<std::string>   directory{fhicl::Name("directory"),
-                                           "TrackerHitOccupancy"};
+		// Minimum reconstructed energy deposit in MeV; zero disables the cut.
+		fhicl::Atom<double>      minEDep{fhicl::Name("minEDep"), 0.0};
+		fhicl::Atom<std::string> directory{fhicl::Name("directory"),
+		                                   "TrackerHitOccupancy"};
 	};
 	using Parameters = art::EDAnalyzer::Table<Config>;
 	explicit TrackerHitOccupancy(Parameters const& p)
@@ -45,7 +48,11 @@ class TrackerHitOccupancy : public art::EDAnalyzer
 	    , port_(p().port())
 	    , every_(p().publishEvery())
 	    , directory_(p().directory())
+	    , minEDep_(p().minEDep())
 	{
+		if(!std::isfinite(minEDep_) || minEDep_ < 0.0)
+			throw cet::exception("Configuration")
+			    << "TrackerHitOccupancy minEDep must be finite and nonnegative (MeV)";
 		if(every_ == 0 || directory_.empty() ||
 		   (publish_ && (address_.empty() || port_ < 1 || port_ > 65535)))
 			throw cet::exception("Configuration")
@@ -60,6 +67,7 @@ class TrackerHitOccupancy : public art::EDAnalyzer
 	int                                         port_;
 	unsigned                                    every_;
 	std::string                                 directory_, runDirectory_;
+	double                                      minEDep_;
 	std::uint64_t                               pendingEvents_ = 0;
 	std::array<TH1D*, nPanels>                  totals_{};
 	std::array<std::unique_ptr<TH1D>, nPanels>  deltas_{};
@@ -118,6 +126,10 @@ class TrackerHitOccupancy : public art::EDAnalyzer
 		}
 		for(auto const& hit : *hits)
 		{
+			// Apply the same selection to ROOT totals and live increments.
+			// Zero keeps the previous behavior; an active cut also rejects NaN energy.
+			if(minEDep_ > 0.0 && !(hit.energyDep() >= minEDep_))
+				continue;
 			auto sid = hit.strawId();
 			totals_[sid.uniquePanel()]->Fill(sid.straw());
 			deltas_[sid.uniquePanel()]->Fill(sid.straw());

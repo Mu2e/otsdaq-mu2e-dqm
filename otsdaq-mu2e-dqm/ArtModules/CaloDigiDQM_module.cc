@@ -195,7 +195,7 @@ class CaloDigiDQM : public art::EDAnalyzer
 
 		// art input tag label for the CaloDigiCollection
 		fhicl::Atom<std::string> caloDigiModuleLabel{fhicl::Name("caloDigiModuleLabel"),
-		                                             "CaloDigisFromDTCEvents"};
+		                                             "CaloDigi"};
 
 		// Disk maps are always saved to the ROOT file.
 		// This flag controls disk-map streaming only.
