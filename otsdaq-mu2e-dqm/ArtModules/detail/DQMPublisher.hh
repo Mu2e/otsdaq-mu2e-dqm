@@ -72,7 +72,7 @@ class DQMPublisher
 
 	void disconnect() { sender_.reset(); }
 
-	bool enabled() const { return enabled_ && sender_ != nullptr; }
+	bool        enabled() const { return enabled_ && sender_ != nullptr; }
 	std::size_t nSends() const { return nSends_; }
 
 	// True when sending is on and sendIntervalSec has passed since the last send.
@@ -122,11 +122,12 @@ class DQMPublisher
 	{
 		const auto groups = published();
 		std::cout << logPrefix_ << "publishing " << groups.size() + extra.size()
-		          << " HistoSender group(s)" << (enabled_ ? "" : " (sending disabled)") << ", "
-		          << nSends_ << " send(s):" << std::endl;
+		          << " HistoSender group(s)" << (enabled_ ? "" : " (sending disabled)")
+		          << ", " << nSends_ << " send(s):" << std::endl;
 		for(const auto& [group, copies] : groups)
 		{
-			std::cout << logPrefix_ << "  " << folder(group) << "  (" << copies.size() << ")";
+			std::cout << logPrefix_ << "  " << folder(group) << "  (" << copies.size()
+			          << ")";
 			if(copies.size() <= 8)  // naming every member of a large group helps nobody
 				for(const TH1* h : copies)
 					std::cout << " " << h->GetName();

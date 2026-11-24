@@ -288,8 +288,8 @@ class CrvDQM : public art::EDAnalyzer
 	std::chrono::time_point<std::chrono::steady_clock> statLastLog_;
 
 	// Misc member variables
-	std::string                                        outputPrefix_;
-	TRandom3                                           random_;
+	std::string outputPrefix_;
+	TRandom3    random_;
 };
 
 // Constructor impl
