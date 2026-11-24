@@ -604,7 +604,7 @@ void LumiDQM::accumulateTrackerHits(const mu2e::IntensityInfoTrackerHits& info)
 void LumiDQM::accumulateTimeClusters(const mu2e::IntensityInfoTimeCluster& info)
 {
 	//-----get observables and calculate Reco------
-	const int    nProtons            = info.nProtonTCs();
+	const int    nProtons            = info.nTCs();
 	const double recoNPOT_nProtonsDF = RecoNPOT::POTfromDFTCs(nProtons);
 
 	//-----Fill histograms and add to running sums-----
