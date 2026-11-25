@@ -1,0 +1,105 @@
+# Minimal dispatcher client: connect to a running artdaq Dispatcher, pull
+# events, and print the data-product list of each one (no Offline reco).
+# Use it to check that a dispatcher is reachable and serving events before
+# debugging a heavier DQM / event-display client.
+#
+# Usage:
+#   art -c dispatcher_dump.fcl -n 10
+#
+# Defaults point at DispatcherTrig on mu2e-dl-01 (xmlrpc port 10080). To use
+# another dispatcher, override in a wrapper fcl, e.g.
+#   #include "dispatcher_dump.fcl"
+#   source.dispatcherHost: "mu2e-dl-02-data.fnal.gov"
+#   source.dispatcherPort: 10081
+# and update the host_map entries in dumpTransfer (prolog) to match.
+#
+# Notes:
+# - Uses its own data port (8345) and unique_label so it doesn't collide with
+#   other clients (e.g. displayDQMSupervisor on 8340). Each client needs its
+#   own port; leftover dispatcher-side senders will attach to a reused one.
+# - Exit can take ~minutes: the receiver drains the socket until the
+#   dispatcher stops its forked art job after unregister. Ctrl-C is fine.
+# - Prescaling only works via dispatcher_config.filter_paths + SelectEvents
+#   on the output; the dispatcher ignores other paths in dispatcher_config.physics.
+
+BEGIN_PROLOG
+dumpTransfer: {
+   transferPluginType: "TCPSocket"
+   unique_label: "dispatcherDump_to_dispatcher0"
+   source_rank: 202
+   destination_rank: 104
+   port: 8345
+   max_fragment_size_words: 1.048576e6
+   host_map: [
+      { host: "mu2e-dl-01-data.fnal.gov" rank: 202 },
+      { host: "mu2e-dl-01-data.fnal.gov" rank: 104 }
+   ]
+}
+END_PROLOG
+
+process_name: "DispatcherDump"
+
+services: {
+   ArtdaqFragmentNamingServiceInterface: {
+      helper_plugin: "Mu2e"
+      service_provider: "ArtdaqFragmentNamingService"
+   }
+   ArtdaqSharedMemoryServiceInterface: {
+      service_provider: "ArtdaqGlobalsService"
+   }
+}
+
+source: {
+   module_type: "TransferInput"
+   commanderPluginType: "xmlrpc"
+   dispatcherHost: "mu2e-dl-01-data.fnal.gov"
+   dispatcherPort: 10080
+   transfer_plugin: @local::dumpTransfer
+
+   # This block is sent to the dispatcher, which forks an art job from it.
+   dispatcher_config: {
+      unique_label: "dispatcherDump"
+      process_name: "DispatcherDumpArtJob"
+      source: { module_type: "ArtdaqInput" }
+      services: {
+         ArtdaqFragmentNamingServiceInterface: {
+            helper_plugin: "Mu2e"
+            service_provider: "ArtdaqFragmentNamingService"
+         }
+         ArtdaqSharedMemoryServiceInterface: {
+            service_provider: "ArtdaqSharedMemoryService"
+            resume_after_timeout: true
+            waiting_time: 30
+         }
+      }
+      # Prescale must go in filter_paths + SelectEvents; the dispatcher ignores
+      # physics.<paths> and only uses "path" for the output.
+      filter_paths: [ { name: "prescalePath" path: [ "prescaler" ] } ]
+      physics: {
+         filters: {
+            prescaler: { module_type: "Prescaler" prescaleFactor: 100 prescaleOffset: 0 }
+         }
+      }
+      outputs: {
+         dumpOut: {
+            module_type: "TransferOutputReliable"
+            SelectEvents: [ "prescalePath" ]
+            transfer_plugin: @local::dumpTransfer
+         }
+      }
+      path: [ "dumpOut" ]
+   }
+}
+
+outputs: {
+   dump: {
+      module_type: FileDumperOutput
+      wantProductFriendlyClassName: true
+      onlyIfPresent: true
+   }
+}
+
+physics: {
+   e1: [ dump ]
+   end_paths: [ e1 ]
+}
