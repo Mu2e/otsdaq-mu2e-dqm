@@ -84,20 +84,50 @@ $ mz
 - The Consumer for this example is in DataProcessorPlugins -  see dqmMu2eHistoConsumer_processor.cc to see how the consumer reads the root object using only the name. You must have a class member of the same type as you filled in you module. There is o need to rename or rebook (that's why we have the class). 
 - To add in Mu2e DataProducts you need to make sure you add in the Mu2e libraries- see ArtModule/CMakeList for examples.
 
+## Online modules on DQMHelpers clients
+
+A subsystem whose histograms are a client of `Offline/DQMHelpers` (CRV today;
+see `Offline/DQMHelpers/README.md`, "Adding a subdetector") needs only a thin
+art module here: the client books and fills, and
+`ArtModules/detail/DQMPublisher.hh` ships what the client's FHiCL rules
+publish, each group as `<prefix>/<group>:replace` through HistoSender, at most
+once per `sendIntervalSec`. The module reads its input, forwards the run and
+subrun boundaries, and draws its own display if it has one:
+
+```cpp
+ots::DQMPublisher publisher_{ps, "trk"};  // address, port, sendHists, sendIntervalSec
+mu2e::TrackerDigiDQM dqm_{clientHists(ps, "digi")};
+
+beginJob:    dqm_.Book(tfs_->mkdir("TrackerDigiDQM")); publisher_.add(dqm_); publisher_.connect();
+beginRun:    dqm_.ResetForNewRun();
+beginSubRun: dqm_.BeginSubRun(run, subrun);   endSubRun: dqm_.EndSubRun();
+analyze:     dqm_.Fill(digis); if(publisher_.due()) publisher_.send();
+endJob:      dqm_.EndJob(); publisher_.send(); publisher_.logPublished(); publisher_.disconnect();
+```
+
+`CrvDQM` is the full-size example (two clients, THttpServer page, display-only
+extra histograms passed to `send()`).
+
 ## CRV DQM
 
 `CrvDQM` (digis and per-link status, THttpServer page plus HistoSender) and
-`CrvStatusMetrics` (artdaq LastPoint metrics) moved here from otsdaq-mu2e-crv,
-which keeps the CRV front-end interfaces, table plugins and viewer.
+`CrvStatusMetrics` (graphite metrics via the artdaq MetricManager: error
+counts per type as running sums, digis per event per global FEB as averages;
+no histograms) live here. otsdaq-mu2e-crv keeps
+the CRV front-end interfaces, table plugins and viewer, plus
+`fcl/CrvDQM_online.fcl`, the prolog aliases (`crvDqmOnlineDigi`,
+`crvDqmOnlineStatus`) that the OTS configuration database references for the
+`digi` and `status` tables. The old copies of both modules are in
+otsdaq-mu2e-crv's `ArtModules/attic/`.
 
-Neither module books or fills a histogram. The histogram sets, their fixed
+`CrvDQM` books and fills no histogram itself. The histogram sets, their fixed
 binning and the fills all live in `Offline/CRVDQM`, built on the generic
 `Offline/DQMHelpers` core, so the same client classes run here and in the
 offline art jobs in [Mu2e/DQM](https://github.com/Mu2e/DQM);
 the binning is fixed so that the two can be merged and compared across a run
 period. What each module publishes is chosen by its `digi` and `status` FHiCL
 tables, whose presets are in `Offline/CRVDQM/fcl/prolog.fcl`. Read
-`Offline/CRVDQM/README.md` before changing either module, and note that
+`Offline/CRVDQM/README.md` before changing it, and note that
 changing binning is a versioned operation described there.
 
 Job fcl: `ArtModules/fcl/RunCrvDQM.fcl` (online)

@@ -4,7 +4,7 @@
 //
 // Histogram booking/filling is owned by mu2e::CRVDigiDQM (digis) and
 // mu2e::CRVStatusDQM (per-link status, under status/) in Offline/CRVDQM,
-// whose binning is fixed. This module keeps I/O, HistoSender, THttpServer,
+// whose binning is fixed. This module keeps I/O, sending (detail/DQMPublisher.hh), THttpServer,
 // styling, display zoom, and PDF export. What is published is chosen by the
 // `digi` and `status` tables (Offline/CRVDQM/fcl/prolog.fcl).
 
@@ -49,7 +49,7 @@
 #include <TSystem.h>
 
 // OTS includes
-#include "otsdaq-mu2e/ArtModules/HistoSender.hh"
+#include "otsdaq-mu2e-dqm/ArtModules/detail/DQMPublisher.hh"
 #include "otsdaq/Macros/CoutMacros.h"
 #include "otsdaq/Macros/ProcessorPluginMacros.h"
 
@@ -140,6 +140,18 @@ mu2e::DQMHistSet::Config clientHists(fhicl::ParameterSet const& ps, const char* 
 	        .hists());
 }
 
+// The CRVDQMRun1 configuration named by `configuration` (its layout name).
+int configurationFromFhicl(fhicl::ParameterSet const& ps)
+{
+	const std::string name = ps.get<std::string>("configuration", "extracted");
+	for(int c = 0; c < mu2e::CRVDQMRun1::kNConfigurations; ++c)
+		if(name == mu2e::CRVDQMRun1::configurationName(c))
+			return c;
+	throw cet::exception("CrvDQM")
+	    << "configuration \"" << name << "\" is not a CRVDQMRun1 configuration "
+	    << "(run1a, extracted).\n";
+}
+
 // Workaround for ROOT fatal "TPad::Range: y1 == y2 == 0" on empty histograms drawn
 // in the web canvas. Put a tiny entry into bin 1 so max_bin_content > 0; it is
 // overwritten as soon as real data arrives.
@@ -178,6 +190,8 @@ class CrvDQM : public art::EDAnalyzer
 
 	/// Module methods
 	void Send();
+	// Display-only objects shipped beside the clients' published copies.
+	DQMPublisher::Extra extraHists();
 	// What `publish` selected, printed once so an operator can see whether a
 	// FHiCL change did what they meant.
 	void logPublished();
@@ -206,21 +220,22 @@ class CrvDQM : public art::EDAnalyzer
 	void updateWebDisplay(bool force = false);
 
 	// fcl parameters
+	// CRVDQMRun1 configuration the clients book for ("run1a" or "extracted",
+	// default extracted = KPP): it sizes the FEB-, channel- and link-indexed
+	// axes. Booking happens in beginJob, before any geometry is available, so
+	// it is a parameter; the geometry seen at run start must name the same one.
+	int           configuration_;
 	art::InputTag crvDigiTag_;    // producer module label
 	art::InputTag crvStatusTag_;  // CrvStatus producer module label
 	int           diagLevel_;
-	int           port_;  // port to connect to
-	std::string   address_;
 	std::string   outputTag_;
-	bool          sendHists_;
 	bool          dummyHist_;
 	bool          saveCanvasesToPdf_;
 	bool          showSameFpgaTimingInCanvas_;
 	std::string   canvasPdfFile_;
 
-	// HISTOGRAM SENDING
-	std::unique_ptr<HistoSender> histoSender_;
-	float                        sendIntervalSec_;
+	// HISTOGRAM SENDING: address, port, sendHists, sendIntervalSec
+	DQMPublisher publisher_;
 
 	// ROOT TFileService
 	art::ServiceHandle<art::TFileService> tfs_;
@@ -273,28 +288,25 @@ class CrvDQM : public art::EDAnalyzer
 	std::chrono::time_point<std::chrono::steady_clock> statLastLog_;
 
 	// Misc member variables
-	std::chrono::time_point<std::chrono::steady_clock> lastSendTime_;
-	std::string                                        outputPrefix_;
-	TRandom3                                           random_;
+	std::string outputPrefix_;
+	TRandom3    random_;
 };
 
 // Constructor impl
 CrvDQM::CrvDQM(fhicl::ParameterSet const& ps)
     : art::EDAnalyzer(ps)
+    , configuration_(configurationFromFhicl(ps))
     , crvDigiTag_(ps.get<std::string>("crvDigiTag", "CrvDigi"))
     , crvStatusTag_(ps.get<std::string>("crvStatusTag", crvDigiTag_.label()))
     , diagLevel_(ps.get<int>("diagLevel", 3))
-    , port_(ps.get<int>("port", 6000))
-    , address_(ps.get<std::string>("address", "localhost"))
     , outputTag_(ps.get<std::string>("outputTag", "CrvDQM"))
-    , sendHists_(ps.get<bool>("sendHists", true))
     , dummyHist_(ps.get<bool>("dummyHist", false))
     , saveCanvasesToPdf_(ps.get<bool>("saveCanvasesToPdf", false))
     , showSameFpgaTimingInCanvas_(ps.get<bool>("showSameFpgaTimingInCanvas", true))
     , canvasPdfFile_(ps.get<std::string>("canvasPdfFile", "CrvDQM.pdf"))
-    , sendIntervalSec_(ps.get<float>("sendIntervalSec", 0.5))
-    , dqm_((rejectRemovedKeys(ps), clientHists(ps, "digi")))
-    , statusDqm_(clientHists(ps, "status"))
+    , publisher_(ps, "crv")
+    , dqm_((rejectRemovedKeys(ps), clientHists(ps, "digi")), configuration_)
+    , statusDqm_(clientHists(ps, "status"), configuration_)
     , h1_dummy_(nullptr)
     , enableHttpServer_(ps.get<bool>("enableHttpServer", true))
     , httpPort_(ps.get<int>("httpPort", 8877))
@@ -309,7 +321,6 @@ CrvDQM::CrvDQM(fhicl::ParameterSet const& ps)
 	outputPrefix_ = "[CrvDQM] ";
 	std::cout << outputPrefix_ << "Initialised"
 	          << " (onlineRefreshPeriodMs=" << onlineRefreshPeriodMs_
-	          << ", sendIntervalSec=" << sendIntervalSec_
 	          << ", enableHttpServer=" << enableHttpServer_ << ")" << std::endl;
 	// ROOT::EnableThreadSafety();
 }
@@ -378,23 +389,8 @@ void CrvDQM::beginJob()
 		std::cout << outputPrefix_ << "Beginning job" << std::endl;
 	}
 
-	// Initialise histoSender
-	if(sendHists_)
-	{
-		try
-		{
-			histoSender_ = std::make_unique<HistoSender>(address_, port_);
-			std::cout << outputPrefix_ << "Successfully connected HistoSender to "
-			          << address_ << ":" << port_ << std::endl;
-		}
-		catch(const std::exception& e)
-		{
-			std::cout << outputPrefix_ << "Failed to initialise HistoSender: " << e.what()
-			          << std::endl;
-			// Disable histogram sending if connection fails
-			sendHists_ = false;
-		}
-	}
+	// A failed connection disables sending, not the module
+	publisher_.connect();
 
 	art::TFileDirectory dir = tfs_->mkdir(outputTag_);
 	if(dummyHist_)
@@ -405,6 +401,8 @@ void CrvDQM::beginJob()
 	{
 		dqm_.Book(dir);
 		statusDqm_.Book(tfs_->mkdir(outputTag_ + "/status"));
+		publisher_.add(dqm_);
+		publisher_.add(statusDqm_);
 		for(const char* name : {"g_digisVsEwt", "g_digisAvgVsEwt"})
 		{
 			if(TGraph* g = digiGraph(name))
@@ -414,7 +412,7 @@ void CrvDQM::beginJob()
 				g->SetDrawOption("AP");
 			}
 		}
-		const mu2e::DQMAxis link = mu2e::CRVStatusDQM::kLink;
+		const mu2e::DQMAxis link = statusDqm_.linkAxis();
 		h_invalidLatencyRate_    = std::make_unique<TH1F>(
             "linkLatencyInvalidRate",
             "Invalid link-latency words / status blocks;DTC#times6 + link ID;Fraction",
@@ -428,9 +426,8 @@ void CrvDQM::beginJob()
 	random_.SetSeed(12345);
 
 	// Start last update time
-	lastSendTime_    = std::chrono::steady_clock::now();
-	lastRefreshTime_ = lastSendTime_;
-	statLastLog_     = lastSendTime_;
+	lastRefreshTime_ = std::chrono::steady_clock::now();
+	statLastLog_     = lastRefreshTime_;
 
 	if(enableHttpServer_)
 	{
@@ -452,93 +449,36 @@ void CrvDQM::beginJob()
 	updateWebDisplay();
 }
 
+DQMPublisher::Extra CrvDQM::extraHists()
+{
+	// The dummy job ships one plumbing-test histogram and no client copies.
+	if(dummyHist_)
+		return {{"h1_gaus", {h1_dummy_}}};
+	return {{"linkLatencyInvalidRate", {h_invalidLatencyRate_.get()}}};
+}
+
 void CrvDQM::Send()
 {
-	// Check flag
-	if(!sendHists_)
+	if(!publisher_.enabled())
 	{
 		return;
 	}
 
-	// Check pointer
-	if(histoSender_ == nullptr)
-	{
-		std::cout << outputPrefix_ << "ERROR: histoSender pointer is null" << std::endl;
-		return;
-	}
-
-	// The live segment copies are labelled with the range they hold; refresh
-	// that before shipping, so a title read on the GUI is never behind.
-	dqm_.hists().RefreshLabels();
-	statusDqm_.hists().RefreshLabels();
-
-	// Use the map method (three methods in HistoSender.cc)
-	std::map<std::string, std::vector<TH1*>> hists;
-	if(dummyHist_)
-	{
-		hists["crv/h1_gaus:replace"] = {h1_dummy_};
-	}
-	else
-	{
-		for(const auto* set : {&dqm_.hists(), &statusDqm_.hists()})
-		{
-			for(const auto& [group, copies] : set->publishedCopies())
-			{
-				auto& out = hists["crv/" + group + ":replace"];
-				out.insert(out.end(), copies.begin(), copies.end());
-			}
-		}
-		updateInvalidLatencyRate();
-		hists["crv/linkLatencyInvalidRate:replace"] = {h_invalidLatencyRate_.get()};
-	}
-
-	// Call send method
-	histoSender_->sendHistograms(hists);
-	++statSend_;
-
-	// Send graphs: whatever the two clients booked (their tables' liveSeries)
 	if(!dummyHist_)
 	{
-		std::map<std::string, std::vector<TGraph*>> graphs;
-		auto&                                       out = graphs["crv/graphs:replace"];
-		for(const auto* series : {&dqm_.series(), &statusDqm_.series()})
-			out.insert(out.end(), series->graphs().begin(), series->graphs().end());
-		if(!out.empty())
-			histoSender_->sendGraphs(graphs);
+		updateInvalidLatencyRate();
 	}
+	// The clients' published copies under crv/<group>, their graphs under crv/graphs
+	publisher_.send(extraHists());
+	++statSend_;
 
 	if(diagLevel_ > 1)
 	{
-		std::cout << outputPrefix_ << "Sent histograms to " << address_ << ":" << port_
-		          << std::endl;
+		std::cout << outputPrefix_ << "Sent histograms" << std::endl;
 	}
 }
 
-void CrvDQM::logPublished()
-{
-	auto published = dqm_.hists().publishedCopies();
-	for(const auto& [group, copies] : statusDqm_.hists().publishedCopies())
-	{
-		auto& out = published[group];
-		out.insert(out.end(), copies.begin(), copies.end());
-	}
-	std::cout << outputPrefix_ << "publishing " << published.size() + 1
-	          << " HistoSender group(s):" << std::endl;
-	for(const auto& [group, copies] : published)
-	{
-		std::cout << outputPrefix_ << "  crv/" << group << ":replace  (" << copies.size()
-		          << ")";
-		// Naming every member of a large group helps nobody.
-		if(copies.size() <= 8)
-		{
-			for(TH1* h : copies)
-				std::cout << " " << h->GetName();
-		}
-		std::cout << std::endl;
-	}
-	std::cout << outputPrefix_ << "  crv/linkLatencyInvalidRate:replace  (1)"
-	          << std::endl;
-}
+void CrvDQM::logPublished() { publisher_.logPublished(extraHists()); }
 
 TH1* CrvDQM::jobCopy(const char* name)
 {
@@ -645,6 +585,14 @@ void CrvDQM::updateLayout(art::Event const& event)
 		          << "\" (configuration "
 		          << mu2e::CRVDQMRun1::configurationName(configuration) << ")"
 		          << std::endl;
+		if(configuration != configuration_)
+			std::cout << outputPrefix_
+			          << "ERROR: the clients were booked for configuration \""
+			          << mu2e::CRVDQMRun1::configurationName(configuration_)
+			          << "\" (fcl `configuration`) but the geometry names \""
+			          << mu2e::CRVDQMRun1::configurationName(configuration)
+			          << "\"; per-sector occupancy and partner timing stay EMPTY"
+			          << std::endl;
 	}
 	catch(const std::exception& e)
 	{
@@ -692,7 +640,7 @@ void CrvDQM::zoomToActiveGlobalFebs()
 		return;
 	// One FEB of margin, so an edge FEB going quiet is still visible.
 	const int lo = std::max(*febIds.begin() - 1, 0);
-	const int hi = std::min(*febIds.rbegin() + 1, mu2e::CRVDQMRun1::kNFebs - 1);
+	const int hi = std::min(*febIds.rbegin() + 1, dqm_.nFebs() - 1);
 
 	for(const auto& spec : kGlobalFebAxes)
 	{
@@ -707,7 +655,7 @@ void CrvDQM::zoomToActiveGlobalFebs()
 	// range; a ROC with no hits is left full-range rather than shown empty-zoomed.
 	const int nFebPerRoc = mu2e::CRVDQMRun1::kNFebPerROC;
 	const int nChan      = mu2e::CRVDQMRun1::kNChanPerFEB;
-	for(int roc = 1; roc <= mu2e::CRVDQMRun1::kNROC; ++roc)
+	for(int roc = 1; roc <= dqm_.nROC(); ++roc)
 	{
 		const int first = (roc - 1) * nFebPerRoc;
 		auto      it    = febIds.lower_bound(first);
@@ -732,7 +680,7 @@ void CrvDQM::unzoomGlobalFebAxes()
 			a->SetRange(0, 0);
 		}
 	}
-	for(int roc = 1; roc <= mu2e::CRVDQMRun1::kNROC; ++roc)
+	for(int roc = 1; roc <= dqm_.nROC(); ++roc)
 		for(TH1* h : dqm_.hists().copies(Form("crvDigiRates_ROC%d", roc)))
 			h->GetXaxis()->SetRange(0, 0);
 }
@@ -1140,15 +1088,11 @@ void CrvDQM::analyze(art::Event const& event)
 	///////////////////// Send /////////////////////
 
 	// Send histograms in fixed time intervals
-	auto                          currentTime = std::chrono::steady_clock::now();
-	std::chrono::duration<double> elapsed     = currentTime - lastSendTime_;
-
-	if(elapsed.count() >= sendIntervalSec_)
+	if(publisher_.due())
 	{
 		Send();
-		// Update last send time
-		lastSendTime_ = currentTime;
 	}
+	auto currentTime = std::chrono::steady_clock::now();
 
 	updateWebDisplay();
 
@@ -1227,11 +1171,8 @@ void CrvDQM::endJob()
 	}
 
 	// Send final histograms & clean up
-	if(sendHists_ && histoSender_ != nullptr)
-	{
-		Send();
-		histoSender_.reset();
-	}
+	Send();
+	publisher_.disconnect();
 
 	std::vector<TCanvas*> canvasesForPdf;
 	if(enableHttpServer_ && webCanvas_ != nullptr)
@@ -1254,7 +1195,7 @@ void CrvDQM::endJob()
 		art::TFileDirectory canvasDir =
 		    tfs_->mkdir(outputTag_).mkdir("timing_feb_canvases");
 
-		for(int globalFeb = 0; globalFeb < mu2e::CRVDQMRun1::kNFebs; ++globalFeb)
+		for(int globalFeb = 0; globalFeb < dqm_.nFebs(); ++globalFeb)
 		{
 			const int firstCol = globalFeb * kNFpgaPairs + 1;
 			if(pairs->Integral(
